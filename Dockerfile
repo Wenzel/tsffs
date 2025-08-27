@@ -12,6 +12,7 @@ ARG PUBLIC_SIMICS_PACKAGE_VERSION_1000="6.0.185"
 ENV SIMICS_BASE="/workspace/simics/simics-${PUBLIC_SIMICS_PACKAGE_VERSION_1000}/"
 # Add cargo and ispm to the path
 ENV PATH="/root/.cargo/bin:/workspace/simics/ispm:${PATH}"
+ENV RUST_BACKTRACE=full
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
@@ -94,36 +95,36 @@ WORKDIR /workspace/tsffs/
 # Build the project by initializing it as a project associated with the local SIMICS installation
 # and building the module using the build script. Then, install the built TSFFS SIMICS
 # package into the local SIMICS installation for use.
-RUN cargo install cargo-simics-build && \
-    cargo simics-build -r && \
-    ispm packages \
-    -i target/release/*-linux64.ispm \
-    --non-interactive --trust-insecure-packages
+# RUN cargo install cargo-simics-build && \
+#     cargo simics-build -r && \
+#     ispm packages \
+#     -i target/release/*-linux64.ispm \
+#     --non-interactive --trust-insecure-packages
 
 WORKDIR /workspace/projects/example/
 
-# Create an example project with:
-# - SIMICS Base (1000)
-# - QSP X86 (2096)
-# - QSP CPU (8112)
-# - Crypto Engine (1030) [only necessary because it is required by Golden Cove]
-# - TSFFS Fuzzer (31337)
-# - A built EFI application (test.efi) which checks a password and crashes when it gets the
-#   password "fuzzing!"
-# - A SIMICS script that configures the fuzzer for the example and starts fuzzing it
-RUN ispm projects /workspace/projects/example/ --create \
-    1000-latest \
-    2096-latest \
-    8112-latest \
-    1030-latest \
-    31337-latest --ignore-existing-files --non-interactive && \
-    cp /workspace/tsffs/examples/docker-example/fuzz.simics /workspace/projects/example/ && \
-    cp /workspace/tsffs/tests/rsrc/minimal_boot_disk.craff /workspace/projects/example/ && \
-    cp /workspace/tsffs/tests/rsrc/x86_64-uefi/* /workspace/projects/example/ && \
-    cp /workspace/tsffs/harness/tsffs.h /workspace/projects/example/ && \
-    ninja
+# # Create an example project with:
+# # - SIMICS Base (1000)
+# # - QSP X86 (2096)
+# # - QSP CPU (8112)
+# # - Crypto Engine (1030) [only necessary because it is required by Golden Cove]
+# # - TSFFS Fuzzer (31337)
+# # - A built EFI application (test.efi) which checks a password and crashes when it gets the
+# #   password "fuzzing!"
+# # - A SIMICS script that configures the fuzzer for the example and starts fuzzing it
+# RUN ispm projects /workspace/projects/example/ --create \
+#     1000-latest \
+#     2096-latest \
+#     8112-latest \
+#     1030-latest \
+#     31337-latest --ignore-existing-files --non-interactive && \
+#     cp /workspace/tsffs/examples/docker-example/fuzz.simics /workspace/projects/example/ && \
+#     cp /workspace/tsffs/tests/rsrc/minimal_boot_disk.craff /workspace/projects/example/ && \
+#     cp /workspace/tsffs/tests/rsrc/x86_64-uefi/* /workspace/projects/example/ && \
+#     cp /workspace/tsffs/harness/tsffs.h /workspace/projects/example/ && \
+#     ninja
 
-RUN echo 'echo "To run the demo, run ./simics -no-gui --no-win fuzz.simics"' >> /root/.bashrc
+# RUN echo 'echo "To run the demo, run ./simics -no-gui --no-win fuzz.simics"' >> /root/.bashrc
 
 FROM tsffs-base AS tsffs-dev
 ARG USER_UID=1000
@@ -145,11 +146,12 @@ useradd \
       --user-group     \
       --groups dev \
       --shell /bin/bash \
-      $USERNAME        \
- && echo "$USERNAME ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/$USERNAME
+      $USERNAME
+echo "$USERNAME ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/$USERNAME
 
 # set /workspace/simics permissions to root:dev
-chown -R root:dev /workspace/{simics,projects} && chmod -R g+w /workspace/{simics,projects}
+chown -R root:dev /workspace/{simics,projects}
+chmod -R 750 /workspace/{simics,projects}
 
 # install Rust nightly for the user
 sudo -E -u $USERNAME bash -c 'curl https://sh.rustup.rs -sSf | bash -s -- -y --default-toolchain none'

@@ -1,7 +1,12 @@
 {
     "build": {
         "dockerfile": "Dockerfile",
-        "target": "tsffs-dev"
+        "target": "tsffs-dev",
+        "args": {
+            "PUBLIC_SIMICS_PKGS_URL": "https://registrationcenter-download.intel.com/akdlm/IRC_NAS/75b38adc-5af8-48aa-a254-43de9dfc6ec7/simics-7-packages-2025-16-linux64.ispm",
+            "PUBLIC_SIMICS_ISPM_URL": "https://registrationcenter-download.intel.com/akdlm/IRC_NAS/75b38adc-5af8-48aa-a254-43de9dfc6ec7/intel-simics-package-manager-1.14.0-linux64.tar.gz",
+            "PUBLIC_SIMICS_PACKAGE_VERSION_1000": "7.38.0"
+        }
     },
     "remoteUser": "vscode",
     "updateRemoteUserUID": true,

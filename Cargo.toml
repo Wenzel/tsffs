@@ -122,3 +122,15 @@ lto = true
 codegen-units = 1
 opt-level = 3
 debug = true
+
+# use simulator bindings branch for 7.38
+[patch.crates-io]
+cargo-simics-build = { git = "https://github.com/intel/simulator-bindings.git", rev = "17374ba30e564fda5fe9f5503c3ea92a28f98912" }
+ispm-wrapper = { git = "https://github.com/intel/simulator-bindings.git", rev = "17374ba30e564fda5fe9f5503c3ea92a28f98912" }
+simics = { git = "https://github.com/intel/simulator-bindings.git", rev = "17374ba30e564fda5fe9f5503c3ea92a28f98912" }
+simics-api-sys = { git = "https://github.com/intel/simulator-bindings.git", rev = "17374ba30e564fda5fe9f5503c3ea92a28f98912" }
+simics-macro = { git = "https://github.com/intel/simulator-bindings.git", rev = "17374ba30e564fda5fe9f5503c3ea92a28f98912" }
+simics-package = { git = "https://github.com/intel/simulator-bindings.git", rev = "17374ba30e564fda5fe9f5503c3ea92a28f98912" }
+simics-sign = { git = "https://github.com/intel/simulator-bindings.git", rev = "17374ba30e564fda5fe9f5503c3ea92a28f98912" }
+simics-test = { git = "https://github.com/intel/simulator-bindings.git", rev = "17374ba30e564fda5fe9f5503c3ea92a28f98912" }
+simics-build-utils = { git = "https://github.com/intel/simulator-bindings.git", rev = "17374ba30e564fda5fe9f5503c3ea92a28f98912" }
