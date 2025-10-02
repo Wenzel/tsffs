@@ -535,6 +535,12 @@ pub(crate) struct Tsffs {
     restore_min_time_ms: u64,
     /// Maximum restore time observed (milliseconds)  
     restore_max_time_ms: u64,
+    /// The number of fuzzing iterations completed
+    iteration_timing_count: usize,
+    /// Total time spent in complete fuzzing iterations (milliseconds)
+    iteration_total_time_ms: u64,
+    /// Current iteration start time (used for measuring in-progress iteration)
+    current_iteration_start: Option<std::time::Instant>,
 
     windows_os_info: WindowsOsInfo,
     cr3_cache: HashMap<i32, i64>,
@@ -847,6 +853,15 @@ impl Tsffs {
         }
 
         Ok(())
+    }
+
+    /// Finish timing the current fuzzing iteration
+    pub fn finish_iteration_timing(&mut self) {
+        if let Some(start_time) = self.current_iteration_start.take() {
+            let iteration_duration_ms = start_time.elapsed().as_millis() as u64;
+            self.iteration_timing_count += 1;
+            self.iteration_total_time_ms += iteration_duration_ms;
+        }
     }
 
     /// Whether an initial snapshot has been saved

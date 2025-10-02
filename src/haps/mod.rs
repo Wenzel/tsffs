@@ -177,6 +177,9 @@ impl Tsffs {
             self.save_symbolic_coverage()?;
         }
 
+        // Finish timing this fuzzing iteration
+        self.finish_iteration_timing();
+
         debug!(self.as_conf_object(), "Resuming simulation");
 
         run_alone(|| {
@@ -388,6 +391,9 @@ impl Tsffs {
             self.save_symbolic_coverage()?;
         }
 
+        // Finish timing this fuzzing iteration
+        self.finish_iteration_timing();
+
         debug!(self.as_conf_object(), "Resuming simulation");
 
         run_alone(|| {
@@ -492,6 +498,9 @@ impl Tsffs {
         if self.symbolic_coverage {
             self.save_symbolic_coverage()?;
         }
+
+        // Finish timing this fuzzing iteration
+        self.finish_iteration_timing();
 
         debug!(self.as_conf_object(), "Resuming simulation");
 

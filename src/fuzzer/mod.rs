@@ -563,6 +563,9 @@ impl Tsffs {
     }
 
     pub fn get_testcase(&mut self) -> Result<Testcase> {
+        // Mark iteration start time
+        self.current_iteration_start = Some(std::time::Instant::now());
+        
         let testcase = if let Some(testcase) = self.repro_testcase.as_ref() {
             debug!(self.as_conf_object(), "Using repro testcase");
             Testcase {

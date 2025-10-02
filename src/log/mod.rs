@@ -57,6 +57,11 @@ pub(crate) enum LogMessage {
         restore_avg_time_ms: f64,
         restore_min_time_ms: u64,
         restore_max_time_ms: u64,
+        iteration_timing_count: usize,
+        iteration_total_time_ms: u64,
+        iteration_avg_time_ms: f64,
+        restore_percentage: f64,
+        other_fuzzing_time_ms: u64,
         timestamp: String,
     },
 }
@@ -100,6 +105,11 @@ impl LogMessage {
         restore_avg_time_ms: f64,
         restore_min_time_ms: u64,
         restore_max_time_ms: u64,
+        iteration_timing_count: usize,
+        iteration_total_time_ms: u64,
+        iteration_avg_time_ms: f64,
+        restore_percentage: f64,
+        other_fuzzing_time_ms: u64,
     ) -> Self {
         Self::Heartbeat {
             iterations,
@@ -111,6 +121,11 @@ impl LogMessage {
             restore_avg_time_ms,
             restore_min_time_ms,
             restore_max_time_ms,
+            iteration_timing_count,
+            iteration_total_time_ms,
+            iteration_avg_time_ms,
+            restore_percentage,
+            other_fuzzing_time_ms,
             timestamp: Utc::now().to_rfc3339(),
         }
     }
@@ -259,6 +274,24 @@ impl Tsffs {
                     0.0
                 };
 
+                let iteration_avg_time_ms = if self.iteration_timing_count > 0 {
+                    self.iteration_total_time_ms as f64 / self.iteration_timing_count as f64
+                } else {
+                    0.0
+                };
+
+                let restore_percentage = if self.iteration_total_time_ms > 0 {
+                    (self.restore_total_time_ms as f64 / self.iteration_total_time_ms as f64) * 100.0
+                } else {
+                    0.0
+                };
+
+                let other_fuzzing_time_ms = if self.iteration_total_time_ms >= self.restore_total_time_ms {
+                    self.iteration_total_time_ms - self.restore_total_time_ms
+                } else {
+                    0
+                };
+
                 self.log(LogMessage::heartbeat(
                     self.iterations,
                     self.solutions,
@@ -269,6 +302,11 @@ impl Tsffs {
                     restore_avg_time_ms,
                     self.restore_min_time_ms,
                     self.restore_max_time_ms,
+                    self.iteration_timing_count,
+                    self.iteration_total_time_ms,
+                    iteration_avg_time_ms,
+                    restore_percentage,
+                    other_fuzzing_time_ms,
                 ))?;
 
                 // Set the last heartbeat time
