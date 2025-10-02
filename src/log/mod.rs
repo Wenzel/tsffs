@@ -52,6 +52,11 @@ pub(crate) enum LogMessage {
         solutions: usize,
         timeouts: usize,
         edges: usize,
+        restore_count: usize,
+        restore_total_time_ms: u64,
+        restore_avg_time_ms: f64,
+        restore_min_time_ms: u64,
+        restore_max_time_ms: u64,
         timestamp: String,
     },
 }
@@ -90,12 +95,22 @@ impl LogMessage {
         solutions: usize,
         timeouts: usize,
         edges: usize,
+        restore_count: usize,
+        restore_total_time_ms: u64,
+        restore_avg_time_ms: f64,
+        restore_min_time_ms: u64,
+        restore_max_time_ms: u64,
     ) -> Self {
         Self::Heartbeat {
             iterations,
             solutions,
             timeouts,
             edges,
+            restore_count,
+            restore_total_time_ms,
+            restore_avg_time_ms,
+            restore_min_time_ms,
+            restore_max_time_ms,
             timestamp: Utc::now().to_rfc3339(),
         }
     }
@@ -238,11 +253,22 @@ impl Tsffs {
             let last = self.last_heartbeat_time.get_or_insert_with(SystemTime::now);
 
             if last.elapsed()?.as_secs() >= self.heartbeat_interval {
+                let restore_avg_time_ms = if self.restore_count > 0 {
+                    self.restore_total_time_ms as f64 / self.restore_count as f64
+                } else {
+                    0.0
+                };
+
                 self.log(LogMessage::heartbeat(
                     self.iterations,
                     self.solutions,
                     self.timeouts,
                     self.edges_seen.len(),
+                    self.restore_count,
+                    self.restore_total_time_ms,
+                    restore_avg_time_ms,
+                    self.restore_min_time_ms,
+                    self.restore_max_time_ms,
                 ))?;
 
                 // Set the last heartbeat time

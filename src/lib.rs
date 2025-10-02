@@ -527,6 +527,14 @@ pub(crate) struct Tsffs {
     timeouts: usize,
     /// The number of solutions so far
     solutions: usize,
+    /// The number of snapshot restores performed
+    restore_count: usize,
+    /// Total time spent in restore operations (milliseconds)
+    restore_total_time_ms: u64,
+    /// Minimum restore time observed (milliseconds)
+    restore_min_time_ms: u64,
+    /// Maximum restore time observed (milliseconds)  
+    restore_max_time_ms: u64,
 
     windows_os_info: WindowsOsInfo,
     cr3_cache: HashMap<i32, i64>,
@@ -804,6 +812,10 @@ impl Tsffs {
     /// Restore the initial snapshot using the configured method (either rev-exec micro checkpoints
     /// or snapshots)
     pub fn restore_initial_snapshot(&mut self) -> Result<()> {
+        use std::time::Instant;
+
+        let start_time = Instant::now();
+
         #[cfg(simics_version = "7")]
         restore_snapshot(Self::SNAPSHOT_NAME)?;
         #[cfg(simics_version = "6")]
@@ -813,6 +825,25 @@ impl Tsffs {
             })?)?;
 
             discard_future()?;
+        }
+
+        let duration_ms = start_time.elapsed().as_millis() as u64;
+
+        // Update restore statistics
+        self.restore_count += 1;
+        self.restore_total_time_ms += duration_ms;
+
+        // Update min/max times (handle first restore case)
+        if self.restore_count == 1 {
+            self.restore_min_time_ms = duration_ms;
+            self.restore_max_time_ms = duration_ms;
+        } else {
+            if duration_ms < self.restore_min_time_ms {
+                self.restore_min_time_ms = duration_ms;
+            }
+            if duration_ms > self.restore_max_time_ms {
+                self.restore_max_time_ms = duration_ms;
+            }
         }
 
         Ok(())
