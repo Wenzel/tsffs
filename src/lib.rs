@@ -46,15 +46,15 @@ use num_traits::FromPrimitive as _;
 use os::windows::WindowsOsInfo;
 use serde::{Deserialize, Serialize};
 use serde_json::to_writer;
-use simics::continue_simulation;
+use simics::api::sys::cpu_access_scope_t;
 use simics::{
-    break_simulation, class, debug, error, free_attribute, get_class, get_interface,
-    get_processor_number, info, lookup_file, object_clock, run_alone, run_command, run_python,
-    simics_init, sys::save_flags_t, trace, version_base, warn, write_configuration_to_file,
-    AsConfObject, BreakpointId, ClassCreate, ClassObjectsFinalize, ConfObject,
-    CoreBreakpointMemopHap, CoreControlRegisterWriteHap, CoreExceptionHap, CoreMagicInstructionHap,
-    CoreSimulationStoppedHap, CpuInstrumentationSubscribeInterface, Event, EventClassFlag,
-    FromConfObject, HapHandle, Interface,
+    break_simulation, class, continue_simulation, debug, error, free_attribute, get_class,
+    get_interface, get_processor_number, info, lookup_file, object_clock, run_alone, run_command,
+    run_python, simics_init, sys::save_flags_t, trace, version_base, warn,
+    write_configuration_to_file, AsConfObject, BreakpointId, ClassCreate, ClassObjectsFinalize,
+    ConfObject, CoreBreakpointMemopHap, CoreControlRegisterWriteHap, CoreExceptionHap,
+    CoreMagicInstructionHap, CoreSimulationStoppedHap, CpuInstrumentationSubscribeInterface, Event,
+    EventClassFlag, FromConfObject, HapHandle, Interface,
 };
 #[cfg(simics_version = "6")]
 use simics::{
@@ -80,7 +80,7 @@ use std::{
     time::SystemTime,
 };
 use tracer::{
-    tsffs::{on_instruction_after, on_instruction_before},
+    tsffs::{on_instruction_after, on_instruction_before, on_read_after},
     ExecutionTrace,
 };
 use typed_builder::TypedBuilder;
@@ -709,6 +709,13 @@ impl Tsffs {
             cpu_interface.register_instruction_before_cb(
                 null_mut(),
                 Some(on_instruction_before),
+                self as *mut Self as *mut _,
+            )?;
+            // memory tracing
+            cpu_interface.register_read_after_cb(
+                null_mut(),
+                cpu_access_scope_t::CPU_Access_Scope_Explicit,
+                Some(on_read_after),
                 self as *mut Self as *mut _,
             )?;
         }

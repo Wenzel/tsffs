@@ -11,10 +11,10 @@ use rustc_demangle::try_demangle;
 use serde::{Deserialize, Serialize};
 use simics::{
     api::{
-        get_processor_number, sys::instruction_handle_t, AsConfObject, AttrValue, AttrValueType,
-        ConfObject,
+        get_processor_number, sys::instruction_handle_t, sys::memory_handle_t, AsConfObject,
+        AttrValue, AttrValueType, ConfObject,
     },
-    get_interface, trace, ProcessorInfoV2Interface,
+    debug, get_interface, trace, CpuMemoryQueryInterface, ProcessorInfoV2Interface,
 };
 use std::{
     collections::HashMap, ffi::c_void, fmt::Display, hash::Hash, num::Wrapping,
@@ -536,6 +536,41 @@ impl Tsffs {
                     });
             }
         }
+
+        Ok(())
+    }
+
+    #[ffi(arg(rest), arg(self))]
+
+    pub fn on_read_after(
+        &mut self,
+        _obj: *mut ConfObject,
+        cpu: *mut ConfObject,
+        handle: *mut memory_handle_t,
+    ) -> Result<()> {
+        // Obtain the cpu_memory_query interface from the cpu object.
+        // In C this would be done via the connection_t struct (casting obj),
+        // but in Rust we get the interface directly from the cpu.
+        let mut mq = get_interface::<CpuMemoryQueryInterface>(cpu)?;
+
+        let logical_addr = mq.logical_address(handle)?;
+        let physical_addr = mq.physical_address(handle)?;
+        let bytes = mq.get_bytes(handle)?;
+        let size = bytes.size;
+        let data = if !bytes.data.is_null() && size > 0 {
+            unsafe { from_raw_parts(bytes.data, size) }.to_vec()
+        } else {
+            vec![]
+        };
+
+        debug!(
+            self.as_conf_object(),
+            "Memory read: logical={:#x} physical={:#x} size={} data={:02x?}",
+            logical_addr,
+            physical_addr,
+            size,
+            data,
+        );
 
         Ok(())
     }
