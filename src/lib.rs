@@ -444,6 +444,11 @@ pub(crate) struct Tsffs {
     /// the same directory structure as the compiled source, and are looked up by hash.
     pub symbolic_coverage_directory: PathBuf,
 
+    #[class(attribute(optional, default = false))]
+    /// Whether memory access tracing is enabled during fuzzing. When set to `True`,
+    /// memory accesses will be traced. Disabled by default.
+    pub memory_access_tracing: bool,
+
     /// Handle for the core simulation stopped hap
     stop_hap_handle: HapHandle,
     /// Handle for the core breakpoint memop hap
@@ -712,12 +717,14 @@ impl Tsffs {
                 self as *mut Self as *mut _,
             )?;
             // memory tracing
-            cpu_interface.register_read_after_cb(
-                null_mut(),
-                cpu_access_scope_t::CPU_Access_Scope_Explicit,
-                Some(on_read_after),
-                self as *mut Self as *mut _,
-            )?;
+            if self.memory_access_tracing {
+                cpu_interface.register_read_after_cb(
+                    null_mut(),
+                    cpu_access_scope_t::CPU_Access_Scope_Explicit,
+                    Some(on_read_after),
+                    self as *mut Self as *mut _,
+                )?;
+            }
         }
 
         if is_start {
