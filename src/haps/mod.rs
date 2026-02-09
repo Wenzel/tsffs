@@ -91,6 +91,10 @@ impl Tsffs {
         }
 
         self.execution_trace.0.clear();
+        if self.memory_access_tracing {
+            self.save_memory_accesses()?;
+            self.memory_accesses.clear();
+        }
         self.save_repro_bookmark_if_needed()?;
 
         self.continue_after_repro_prepared()?;
@@ -288,6 +292,7 @@ impl Tsffs {
         }
 
         self.execution_trace.0.clear();
+        self.memory_accesses.clear();
         self.save_repro_bookmark_if_needed()?;
 
         self.continue_after_repro_prepared()?;
@@ -328,6 +333,7 @@ impl Tsffs {
         }
 
         self.execution_trace.0.clear();
+        self.memory_accesses.clear();
         self.save_repro_bookmark_if_needed()?;
 
         debug!(self.as_conf_object(), "Resuming simulation");

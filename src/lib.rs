@@ -37,6 +37,7 @@ use arch::{Architecture, ArchitectureHint, ArchitectureOperations};
 use fuzzer::{messages::FuzzerMessage, ShutdownMessage, Testcase};
 use indoc::indoc;
 use lcov2::Records;
+use libafl::inputs::Input;
 use libafl::{inputs::HasBytesVec, prelude::ExitKind};
 use libafl_bolts::prelude::OwnedMutSlice;
 use libafl_targets::AFLppCmpLogMap;
@@ -81,7 +82,7 @@ use std::{
 };
 use tracer::{
     tsffs::{on_instruction_after, on_instruction_before, on_read_after},
-    ExecutionTrace,
+    ExecutionTrace, MemoryAccessEntry,
 };
 use typed_builder::TypedBuilder;
 use versions::{Requirement, Versioning};
@@ -410,6 +411,11 @@ pub(crate) struct Tsffs {
     #[class(attribute(optional, default = false))]
     /// Whether execution traces should include just PC (vs instruction text and bytes)
     pub execution_trace_pc_only: bool,
+    #[class(attribute(optional, default = lookup_file("%simics%")?.join("memory-traces")))]
+    /// The directory to save memory traces to, if memory access tracing is enabled. This
+    /// directory may be a SIMICS relative path prefixed with "%simics%". If not
+    /// provided, "%simics%/memory-traces" will be used by default.
+    pub memory_trace_directory: PathBuf,
     #[class(attribute(optional, default = true))]
     /// Whether a heartbeat message should be emitted every `heartbeat_interval` seconds
     pub heartbeat: bool,
@@ -502,6 +508,8 @@ pub(crate) struct Tsffs {
     edges_seen_since_last: HashMap<u64, u64>,
     /// The set of PCs comprising the current execution trace. This is cleared every execution.
     execution_trace: ExecutionTrace,
+    /// Accumulated memory access entries. Cleared every execution.
+    memory_accesses: Vec<MemoryAccessEntry>,
     /// The current line coverage state comprising the total execution. This is not
     /// cleared and is persistent across the full campaign until the fuzzer stops.
     coverage: Records,
@@ -537,6 +545,9 @@ pub(crate) struct Tsffs {
     processors: HashMap<i32, Architecture>,
     /// A testcase to use for repro
     repro_testcase: Option<Vec<u8>>,
+    /// The name of the previous testcase, used for matching memory access files with testcases
+    /// from the execution that just completed
+    previous_testcase_name: Option<String>,
     /// Whether a bookmark has been set for repro mode
     repro_bookmark_set: bool,
     /// Whether the fuzzer is currently stopped in repro mode
@@ -913,6 +924,11 @@ impl Tsffs {
     pub fn get_and_write_testcase(&mut self) -> Result<()> {
         let testcase = self.get_testcase()?;
 
+        // Store the testcase name before writing it. This will be used to correlate
+        // memory accesses saved in the next iteration with this testcase.
+        let testcase_name = testcase.testcase.generate_name(0);
+        self.previous_testcase_name = Some(testcase_name);
+
         // TODO: Fix cloning - refcell?
         let start_info = self
             .start_info
@@ -1018,6 +1034,37 @@ impl Tsffs {
             self.as_conf_object(),
             "Symbolic coverage saved to {}",
             self.symbolic_coverage_directory.display()
+        );
+
+        Ok(())
+    }
+
+    /// Save accumulated memory accesses to a file as JSON
+    pub fn save_memory_accesses(&mut self) -> Result<()> {
+        if self.memory_accesses.is_empty() {
+            return Ok(());
+        }
+
+        if !self.memory_trace_directory.is_dir() {
+            create_dir_all(&self.memory_trace_directory)?;
+        }
+
+        let testcase_name = self
+            .previous_testcase_name
+            .as_ref()
+            .ok_or_else(|| anyhow!("No previous testcase name available for memory accesses"))?;
+
+        let filename = format!("{}.memaccess.json", testcase_name);
+        let path = self.memory_trace_directory.join(filename);
+
+        let file = File::create(&path)?;
+        to_writer(file, &self.memory_accesses)?;
+
+        debug!(
+            self.as_conf_object(),
+            "Saved {} memory accesses to {}",
+            self.memory_accesses.len(),
+            path.display()
         );
 
         Ok(())

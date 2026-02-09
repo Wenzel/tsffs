@@ -153,6 +153,10 @@ impl Tsffs {
                         self.save_execution_trace()?;
                     }
 
+                    if self.memory_access_tracing {
+                        self.save_memory_accesses()?;
+                    }
+
                     if self.symbolic_coverage {
                         self.save_symbolic_coverage()?;
                     }
@@ -189,6 +193,10 @@ impl Tsffs {
                         self.save_execution_trace()?;
                     }
 
+                    if self.memory_access_tracing {
+                        self.save_memory_accesses()?;
+                    }
+
                     if self.symbolic_coverage {
                         self.save_symbolic_coverage()?;
                     }
@@ -223,6 +231,10 @@ impl Tsffs {
 
                     if self.save_timeout_execution_traces {
                         self.save_execution_trace()?;
+                    }
+
+                    if self.memory_access_tracing {
+                        self.save_memory_accesses()?;
                     }
 
                     if self.symbolic_coverage {

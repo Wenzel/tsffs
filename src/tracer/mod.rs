@@ -24,6 +24,19 @@ use typed_builder::TypedBuilder;
 
 use crate::{arch::ArchitectureOperations, Tsffs};
 
+#[derive(Clone, Deserialize, Serialize, Debug, Default)]
+/// A single recorded memory access
+pub(crate) struct MemoryAccessEntry {
+    /// The logical (virtual) address of the access
+    pub logical_address: u64,
+    /// The physical address of the access
+    pub physical_address: u64,
+    /// The size of the access in bytes
+    pub size: usize,
+    /// The data read (or written)
+    pub data: Vec<u8>,
+}
+
 #[derive(Clone, Deserialize, Serialize, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) struct ExecutionTraceSymbol {
     /// The symbol name
@@ -571,6 +584,13 @@ impl Tsffs {
             size,
             data,
         );
+
+        self.memory_accesses.push(MemoryAccessEntry {
+            logical_address: logical_addr,
+            physical_address: physical_addr,
+            size,
+            data,
+        });
 
         Ok(())
     }
