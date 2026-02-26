@@ -27,6 +27,8 @@ use crate::{arch::ArchitectureOperations, Tsffs};
 #[derive(Clone, Deserialize, Serialize, Debug, Default)]
 /// A single recorded memory access
 pub(crate) struct MemoryAccessEntry {
+    /// The program counter (instruction pointer) at the time of the access
+    pub pc: u64,
     /// The logical (virtual) address of the access
     pub logical_address: u64,
     /// The physical address of the access
@@ -564,6 +566,11 @@ impl Tsffs {
         // but in Rust we get the interface directly from the cpu.
         let mut mq = get_interface::<CpuMemoryQueryInterface>(cpu)?;
 
+        // Capture the instruction pointer (RIP/PC) of the instruction that
+        // performed this memory read.
+        let mut processor_info = get_interface::<ProcessorInfoV2Interface>(cpu)?;
+        let pc = processor_info.get_program_counter()?;
+
         let logical_addr = mq.logical_address(handle)?;
         let physical_addr = mq.physical_address(handle)?;
         let bytes = mq.get_bytes(handle)?;
@@ -571,10 +578,11 @@ impl Tsffs {
 
         debug!(
             self.as_conf_object(),
-            "Memory read: logical={:#x} physical={:#x} size={}", logical_addr, physical_addr, size,
+            "Memory read: pc={:#x} logical={:#x} physical={:#x} size={}", pc, logical_addr, physical_addr, size,
         );
 
         self.memory_accesses.push(MemoryAccessEntry {
+            pc,
             logical_address: logical_addr,
             physical_address: physical_addr,
             size,
