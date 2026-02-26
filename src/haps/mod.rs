@@ -91,10 +91,7 @@ impl Tsffs {
         }
 
         self.execution_trace.0.clear();
-        if self.memory_access_tracing {
-            self.save_memory_accesses()?;
-            self.memory_accesses.clear();
-        }
+        self.memory_accesses.clear();
         self.save_repro_bookmark_if_needed()?;
 
         self.continue_after_repro_prepared()?;
@@ -192,6 +189,11 @@ impl Tsffs {
             );
         } else {
             self.cancel_timeout_event()?;
+
+            if self.memory_access_tracing {
+                self.save_memory_accesses()?;
+                self.memory_accesses.clear();
+            }
 
             if self.repro_bookmark_set {
                 self.stopped_for_repro = true;
@@ -355,6 +357,11 @@ impl Tsffs {
         } else {
             self.cancel_timeout_event()?;
 
+            if self.memory_access_tracing {
+                self.save_memory_accesses()?;
+                self.memory_accesses.clear();
+            }
+
             if self.repro_bookmark_set {
                 self.stopped_for_repro = true;
                 let current_log_level = log_level(self.as_conf_object_mut())?;
@@ -409,6 +416,11 @@ impl Tsffs {
             );
         } else {
             self.cancel_timeout_event()?;
+
+            if self.memory_access_tracing {
+                self.save_memory_accesses()?;
+                self.memory_accesses.clear();
+            }
 
             if self.repro_bookmark_set {
                 self.stopped_for_repro = true;
