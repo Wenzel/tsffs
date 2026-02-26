@@ -1060,12 +1060,12 @@ impl Tsffs {
 
         let file = File::create(&path)?;
         let mut writer = BufWriter::new(file);
-        writeln!(writer, "pc,logical_address,physical_address,size")?;
+        writeln!(writer, "pc,logical_address,size")?;
         for entry in &self.memory_accesses {
             writeln!(
                 writer,
-                "{:#x},{:#x},{:#x},{}",
-                entry.pc, entry.logical_address, entry.physical_address, entry.size
+                "{:#x},{:#x},{}",
+                entry.pc, entry.logical_address, entry.size
             )?;
         }
         writer.flush()?;

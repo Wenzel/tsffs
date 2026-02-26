@@ -31,8 +31,6 @@ pub(crate) struct MemoryAccessEntry {
     pub pc: u64,
     /// The logical (virtual) address of the access
     pub logical_address: u64,
-    /// The physical address of the access
-    pub physical_address: u64,
     /// The size of the access in bytes
     pub size: usize,
 }
@@ -572,19 +570,17 @@ impl Tsffs {
         let pc = processor_info.get_program_counter()?;
 
         let logical_addr = mq.logical_address(handle)?;
-        let physical_addr = mq.physical_address(handle)?;
         let bytes = mq.get_bytes(handle)?;
         let size = bytes.size;
 
         debug!(
             self.as_conf_object(),
-            "Memory read: pc={:#x} logical={:#x} physical={:#x} size={}", pc, logical_addr, physical_addr, size,
+            "Memory read: pc={:#x} logical={:#x} size={}", pc, logical_addr, size,
         );
 
         self.memory_accesses.push(MemoryAccessEntry {
             pc,
             logical_address: logical_addr,
-            physical_address: physical_addr,
             size,
         });
 
