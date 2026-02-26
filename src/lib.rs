@@ -73,6 +73,7 @@ use std::{
     collections::{hash_map::Entry, BTreeSet, HashMap, HashSet},
     fs::{create_dir_all, remove_dir_all, File},
     hash::{DefaultHasher, Hash, Hasher},
+    io::{BufWriter, Write},
     path::PathBuf,
     ptr::null_mut,
     str::FromStr,
@@ -1039,7 +1040,7 @@ impl Tsffs {
         Ok(())
     }
 
-    /// Save accumulated memory accesses to a file as JSON
+    /// Save accumulated memory accesses to a CSV file
     pub fn save_memory_accesses(&mut self) -> Result<()> {
         if self.memory_accesses.is_empty() {
             return Ok(());
@@ -1054,11 +1055,20 @@ impl Tsffs {
             .as_ref()
             .ok_or_else(|| anyhow!("No previous testcase name available for memory accesses"))?;
 
-        let filename = format!("{}.memaccess.json", testcase_name);
+        let filename = format!("{}.memaccess.csv", testcase_name);
         let path = self.memory_trace_directory.join(filename);
 
         let file = File::create(&path)?;
-        to_writer(file, &self.memory_accesses)?;
+        let mut writer = BufWriter::new(file);
+        writeln!(writer, "logical_address,physical_address,size")?;
+        for entry in &self.memory_accesses {
+            writeln!(
+                writer,
+                "{:#x},{:#x},{}",
+                entry.logical_address, entry.physical_address, entry.size
+            )?;
+        }
+        writer.flush()?;
 
         debug!(
             self.as_conf_object(),
