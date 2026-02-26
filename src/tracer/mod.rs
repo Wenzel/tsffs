@@ -33,8 +33,6 @@ pub(crate) struct MemoryAccessEntry {
     pub physical_address: u64,
     /// The size of the access in bytes
     pub size: usize,
-    /// The data read (or written)
-    pub data: Vec<u8>,
 }
 
 #[derive(Clone, Deserialize, Serialize, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -570,26 +568,16 @@ impl Tsffs {
         let physical_addr = mq.physical_address(handle)?;
         let bytes = mq.get_bytes(handle)?;
         let size = bytes.size;
-        let data = if !bytes.data.is_null() && size > 0 {
-            unsafe { from_raw_parts(bytes.data, size) }.to_vec()
-        } else {
-            vec![]
-        };
 
         debug!(
             self.as_conf_object(),
-            "Memory read: logical={:#x} physical={:#x} size={} data={:02x?}",
-            logical_addr,
-            physical_addr,
-            size,
-            data,
+            "Memory read: logical={:#x} physical={:#x} size={}", logical_addr, physical_addr, size,
         );
 
         self.memory_accesses.push(MemoryAccessEntry {
             logical_address: logical_addr,
             physical_address: physical_addr,
             size,
-            data,
         });
 
         Ok(())
