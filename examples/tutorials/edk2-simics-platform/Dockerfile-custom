@@ -2,10 +2,14 @@ FROM ghcr.io/tianocore/containers/fedora-37-build:a0dd931
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
+RUN dnf install -y clang llvm lld && \
+    dnf clean all
+
 
 ENV EDK_TOOLS_PATH=/workspace/edk2/BaseTools/
 ENV PACKAGES_PATH="/workspace/edk2:/workspace/edk2-platforms:/workspace/edk2-non-osi"
 ENV WORKSPACE=/workspace/
+ENV CLANGSAN_BIN=/usr/bin/
 
 WORKDIR /workspace
 
@@ -17,10 +21,19 @@ RUN source edk2/edksetup.sh && \
 COPY workspace/edk2-platforms /workspace/edk2-platforms
 COPY workspace/edk2-non-osi /workspace/edk2-non-osi
 COPY workspace/FSP /workspace/FSP
+COPY tsffs.h /workspace/edk2-platforms/Platform/Intel/SimicsOpenBoardPkg/Library/DxeLogoLib/tsffs.h
+COPY edk2-platforms.patch /tmp/edk2-platforms.patch
 
 WORKDIR /workspace/edk2-platforms/Platform/Intel
 
+RUN git -C /workspace/edk2-platforms apply --whitespace fix /tmp/edk2-platforms.patch
+
 # Build SimicsOpenBoardPkg
 RUN source /workspace/edk2/edksetup.sh && \
-    python build_bios.py -p BoardX58Ich10X64 -d -t GCC
+    ( python build_bios.py -p BoardX58Ich10 -d -t CLANGSAN || \
+      ( \
+        test -f /workspace/Build.log && cat /workspace/Build.log; \
+        grep -RniE "error:|undefined reference|ld:|clang: error|make: \\*\\*\\*" /workspace/Build /workspace/Build.log || true; \
+        exit 1 \
+      ) )
     

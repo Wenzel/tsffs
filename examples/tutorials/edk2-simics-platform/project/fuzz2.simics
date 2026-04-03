@@ -7,15 +7,15 @@ tsffs.log-level 4
 @tsffs.start_on_harness = True
 @tsffs.stop_on_harness = True
 @tsffs.timeout = 3.0
-@tsffs.exceptions = [13, 14]
+@tsffs.exceptions = [12, 13, 14]
 
 load-module uefi-fw-tracker
 
-load-target "qsp-x86/qsp-uefi-custom" namespace = qsp machine:hardware:firmware:bios = "%simics%/workspace/Build/SimicsOpenBoardPkg/BoardX58Ich10/DEBUG_GCC/FV/BOARDX58ICH10.fd"
+load-target "qsp-x86/qsp-uefi-custom" namespace = qsp machine:hardware:firmware:bios = "%simics%/targets/qsp-x86/images/BOARDX58ICH10_CUSTOM.fd"
 
 new-os-awareness name = qsp.software
 qsp.software.insert-tracker tracker = uefi_fw_tracker_comp
-qsp.software.tracker.detect-parameters -overwrite param-file = "%simics%/uefi.params" map-file = "%simics%/workspace/Build/SimicsOpenBoardPkg/BoardX58Ich10/DEBUG_GCC/SimicsX58.map"
+qsp.software.tracker.detect-parameters -overwrite param-file = "%simics%/uefi.params"
 qsp.software.tracker.load-parameters "%simics%/uefi.params"
 qsp.software.enable-tracker
 @tcf = SIM_get_debugger()
