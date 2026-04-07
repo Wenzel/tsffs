@@ -1,4 +1,13 @@
-project/*
+corpus/
+project/.gdbinit
+project/Tutorial.debug
+project/Tutorial.efi
+project/Tutorial.map
+project/bench-results.txt
+project/bench-summary.txt
+project/checkpoint.ckpt/
+project/log.json
+project/minimal_boot_disk.craff
+project/run-*.simics
+project-*/
 src/tsffs.h
-!project/run.simics
-edk2/

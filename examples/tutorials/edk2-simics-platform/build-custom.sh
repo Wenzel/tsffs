@@ -34,11 +34,29 @@ fi
 # The TSFFS logo harness is tutorial-local, so keep injecting its header into the
 # cloned public tree before building the image in Docker.
 cp "${SCRIPT_DIR}/../../../harness/tsffs.h" "${SCRIPT_DIR}/tsffs.h"
+# Reuse the shell tutorial sources, but swap in a small BMP parser harness so
+# we can validate the ASAN-enabled firmware without pulling in CryptoPkg.
+rm -rf "${SCRIPT_DIR}/tutorial-src"
+cp -r "${SCRIPT_DIR}/../edk2-uefi/src" "${SCRIPT_DIR}/tutorial-src"
 
 docker build -t "${IMAGE_NAME}" -f "${DOCKERFILE}" "${SCRIPT_DIR}"
 docker create --name "${CONTAINER_NAME}" "${IMAGE_NAME}" bash
 rm -rf "${SCRIPT_DIR}/BoardX58Ich10_CUSTOM"
+rm -rf "${SCRIPT_DIR}/project/workspace/Build/SimicsOpenBoardPkg/BoardX58Ich10/DEBUG_CLANGSAN"
 docker cp "${CONTAINER_NAME}:/workspace/Build/SimicsOpenBoardPkg/BoardX58Ich10/DEBUG_CLANGSAN/FV/" "${SCRIPT_DIR}/BoardX58Ich10_CUSTOM"
+mkdir -p "${SCRIPT_DIR}/project/workspace/Build/SimicsOpenBoardPkg/BoardX58Ich10"
+# Keep the full DEBUG_CLANGSAN tree inside the Simics project so the original
+# source-level symbol workflow has the same layout as the stock tutorial.
+docker cp "${CONTAINER_NAME}:/workspace/Build/SimicsOpenBoardPkg/BoardX58Ich10/DEBUG_CLANGSAN" "${SCRIPT_DIR}/project/workspace/Build/SimicsOpenBoardPkg/BoardX58Ich10/"
+docker cp \
+    "${CONTAINER_NAME}:/workspace/Build/Tutorial/DEBUG_CLANGSAN/X64/Tutorial.efi" \
+    "${SCRIPT_DIR}/project/Tutorial.efi"
+docker cp \
+    "${CONTAINER_NAME}:/workspace/Build/Tutorial/DEBUG_CLANGSAN/Tutorial.map" \
+    "${SCRIPT_DIR}/project/Tutorial.map"
+docker cp \
+    "${CONTAINER_NAME}:/workspace/Build/Tutorial/DEBUG_CLANGSAN/X64/Tutorial.debug" \
+    "${SCRIPT_DIR}/project/Tutorial.debug"
 docker rm -f "${CONTAINER_NAME}"
 mkdir -p "${SCRIPT_DIR}/project/targets/qsp-x86/images/"
 cp "${SCRIPT_DIR}/BoardX58Ich10_CUSTOM/BOARDX58ICH10.fd" "${SCRIPT_DIR}/project/targets/qsp-x86/images/BOARDX58ICH10_CUSTOM.fd"

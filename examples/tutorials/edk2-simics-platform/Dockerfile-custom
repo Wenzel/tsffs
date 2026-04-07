@@ -21,6 +21,7 @@ RUN source edk2/edksetup.sh && \
 COPY workspace/edk2-platforms /workspace/edk2-platforms
 COPY workspace/edk2-non-osi /workspace/edk2-non-osi
 COPY workspace/FSP /workspace/FSP
+COPY tutorial-src /workspace/edk2/Tutorial
 COPY tsffs.h /workspace/edk2-platforms/Platform/Intel/SimicsOpenBoardPkg/Library/DxeLogoLib/tsffs.h
 COPY edk2-platforms.patch /tmp/edk2-platforms.patch
 
@@ -36,4 +37,11 @@ RUN source /workspace/edk2/edksetup.sh && \
         grep -RniE "error:|undefined reference|ld:|clang: error|make: \\*\\*\\*" /workspace/Build /workspace/Build.log || true; \
         exit 1 \
       ) )
-    
+
+WORKDIR /workspace/edk2
+
+# Build the shell-launched BMP playground app with the same CLANGSAN toolchain
+# so it exercises the ASAN-enabled firmware without introducing DXE-driver
+# lifecycle issues.
+RUN source /workspace/edk2/edksetup.sh && \
+    build -p Tutorial/Tutorial.dsc -a X64 -b DEBUG -t CLANGSAN

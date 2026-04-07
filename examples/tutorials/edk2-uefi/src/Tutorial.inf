@@ -14,12 +14,12 @@
   Tutorial.c
 
 [Packages]
-  CryptoPkg/CryptoPkg.dec
   MdeModulePkg/MdeModulePkg.dec
   MdePkg/MdePkg.dec
 
 [LibraryClasses]
-  BaseCryptLib
-  SynchronizationLib
+  AsanLib
+  BmpSupportLib
+  MemoryAllocationLib
   UefiApplicationEntryPoint
   UefiLib
