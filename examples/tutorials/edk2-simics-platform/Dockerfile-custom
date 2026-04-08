@@ -22,12 +22,8 @@ COPY workspace/edk2-platforms /workspace/edk2-platforms
 COPY workspace/edk2-non-osi /workspace/edk2-non-osi
 COPY workspace/FSP /workspace/FSP
 COPY tutorial-src /workspace/edk2/Tutorial
-COPY tsffs.h /workspace/edk2-platforms/Platform/Intel/SimicsOpenBoardPkg/Library/DxeLogoLib/tsffs.h
-COPY edk2-platforms.patch /tmp/edk2-platforms.patch
 
 WORKDIR /workspace/edk2-platforms/Platform/Intel
-
-RUN git -C /workspace/edk2-platforms apply --whitespace fix /tmp/edk2-platforms.patch
 
 # Build SimicsOpenBoardPkg
 RUN source /workspace/edk2/edksetup.sh && \

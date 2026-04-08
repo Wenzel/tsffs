@@ -3,24 +3,39 @@
 
 load-module tsffs
 init-tsffs
-tsffs.log-level 4
+tsffs.log-level 2
 @tsffs.start_on_harness = True
-@tsffs.stop_on_harness = True
+@tsffs.stop_on_harness = False
 @tsffs.timeout = 3.0
 @tsffs.exceptions = [12, 13, 14]
 
 load-target "qsp-x86/uefi-shell" namespace = qsp machine:hardware:firmware:bios = "%simics%/targets/qsp-x86/images/BOARDX58ICH10_CUSTOM.fd" machine:hardware:storage:disk0:image = "minimal_boot_disk.craff"
+@conf.qsp.mb.simics_uefi.selected_boot_option = "Internal Shell"
 
 script-branch {
-    bp.time.wait-for seconds = 15
-    qsp.serconsole.con.input "\n"
+    local $kbd = qsp.mb.sb.kbd
+    local $con = qsp.serconsole.con
+    bp.console_string.wait-for $con "End Load Options Dumping"
     bp.time.wait-for seconds = .5
-    qsp.serconsole.con.input "FS0:\n"
+
+    $kbd.key-press ESC
+    bp.console_string.wait-for $con "Boot Manager Menu"
+    bp.time.wait-for seconds = 5.0
+    foreach $i in (range 8) {
+        $kbd.key-press KP_DOWN
+        bp.time.wait-for seconds = .5
+    }
+    $kbd.key-press ENTER
+
+    bp.console_string.wait-for $con "Shell>"
+    bp.time.wait-for seconds = .5
+    $con.input "FS0:\n"
     bp.time.wait-for seconds = .5
     local $manager = (start-agent-manager)
-    qsp.serconsole.con.input ("SimicsAgent.efi --download " + (lookup-file "%simics%/Tutorial.efi") + "\n")
+    $con.input ("SimicsAgent.efi --download " + (lookup-file "%simics%/Tutorial.efi") + "\n")
     bp.time.wait-for seconds = .5
-    qsp.serconsole.con.input "Tutorial.efi\n"
+    @tsffs.stop_on_harness = True
+    $con.input "Tutorial.efi\n"
 }
 
 run

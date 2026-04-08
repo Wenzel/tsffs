@@ -40,7 +40,7 @@ index 9cea5f4665..00815adba2 100644
      // Try BMP decoder
      //
      Blt = NULL;
-+    HARNESS_START(ImageData, &ImageSize);
++    // HARNESS_START(ImageData, &ImageSize);
      Status = ConvertBmpToGopBlt (
                ImageData,
                ImageSize,

@@ -38,6 +38,7 @@ cp "${SCRIPT_DIR}/../../../harness/tsffs.h" "${SCRIPT_DIR}/tsffs.h"
 # we can validate the ASAN-enabled firmware without pulling in CryptoPkg.
 rm -rf "${SCRIPT_DIR}/tutorial-src"
 cp -r "${SCRIPT_DIR}/../edk2-uefi/src" "${SCRIPT_DIR}/tutorial-src"
+cp "${SCRIPT_DIR}/../../../harness/tsffs.h" "${SCRIPT_DIR}/tutorial-src/tsffs.h"
 
 docker build -t "${IMAGE_NAME}" -f "${DOCKERFILE}" "${SCRIPT_DIR}"
 docker create --name "${CONTAINER_NAME}" "${IMAGE_NAME}" bash

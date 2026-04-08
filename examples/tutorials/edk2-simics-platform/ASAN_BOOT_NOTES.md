@@ -258,6 +258,164 @@ This is the key confirmation that:
 2. the tutorial's `Logo.c` harness patch was still active
 3. TSFFS reached the harness entry point
 
+## Second direction: use the shell tutorial as a simple ASAN playground
+
+After the BIOS-logo path was working, the next goal changed:
+
+1. keep the ASAN-enabled custom firmware image
+2. boot into the stock `edk2` UEFI shell flow
+3. run a very small harnessed UEFI application as a playground for ASAN testing
+
+This was done in the same example instead of creating a new one.
+
+The updated runtime flow uses:
+
+- [project/run-custom.simics](/home/wenzel/Projets/tsffs/examples/tutorials/edk2-simics-platform/project/run-custom.simics)
+- [project/fuzz.simics](/home/wenzel/Projets/tsffs/examples/tutorials/edk2-simics-platform/project/fuzz.simics)
+
+Both now boot:
+
+- `qsp-x86/uefi-shell`
+
+with the custom BIOS override:
+
+- `%simics%/targets/qsp-x86/images/BOARDX58ICH10_CUSTOM.fd`
+
+and then use `SimicsAgent.efi` to upload and launch `Tutorial.efi`.
+
+## What failed first: the original X509 shell tutorial
+
+The first attempt reused the original shell tutorial from:
+
+- [examples/tutorials/edk2-uefi/src](/home/wenzel/Projets/tsffs/examples/tutorials/edk2-uefi/src)
+
+That original app uses `BaseCryptLib` and `X509VerifyCert()`.
+
+Under `CLANGSAN`, this failed in `CryptoPkg` / OpenSSL with host `<stdint.h>` type collisions and did not produce a usable standalone shell app build.
+
+The important conclusion was:
+
+- the BIOS-side ASAN build worked
+- the blocking issue was specifically the shell app's `CryptoPkg` dependency surface
+
+## Replacement target that worked better: `BmpSupportLib`
+
+To avoid `CryptoPkg`, the shell tutorial was rewritten as a BMP parser playground.
+
+The harness now targets:
+
+- `TranslateBmpToGopBlt()` from [BmpSupportLib.h](/home/wenzel/Projets/tsffs/examples/tutorials/edk2-simics-platform/workspace/edk2/MdeModulePkg/Include/Library/BmpSupportLib.h)
+
+The implementation it exercises is:
+
+- [BmpSupportLib.c](/home/wenzel/Projets/tsffs/examples/tutorials/edk2-simics-platform/workspace/edk2/MdeModulePkg/Library/BaseBmpSupportLib/BmpSupportLib.c)
+
+Why this was a good replacement:
+
+- it parses attacker-controlled bytes
+- it performs validation, allocation, and memory copies
+- it stays inside core `MdePkg` / `MdeModulePkg`
+- it avoids the `CryptoPkg` / OpenSSL build problems
+- it is a good small target for deliberate ASAN-triggering experiments
+
+The rewritten tutorial source is now in:
+
+- [Tutorial.c](/home/wenzel/Projets/tsffs/examples/tutorials/edk2-uefi/src/Tutorial.c)
+- [Tutorial.inf](/home/wenzel/Projets/tsffs/examples/tutorials/edk2-uefi/src/Tutorial.inf)
+- [Tutorial.dsc](/home/wenzel/Projets/tsffs/examples/tutorials/edk2-uefi/src/Tutorial.dsc)
+
+## Important clarification on the standalone `CLANGSAN` shell app path
+
+There was confusion about whether the standalone shell app was fundamentally unsupported.
+
+What we learned:
+
+- `AsanLib` and related runtime code are present in-tree
+- the BIOS firmware build already uses them successfully
+- a standalone `UEFI_APPLICATION` can also be built with `CLANGSAN`
+- but the library wiring must be explicit in the app's own INF/DSC
+
+In practice this meant:
+
+- declaring `AsanLib` in [Tutorial.inf](/home/wenzel/Projets/tsffs/examples/tutorials/edk2-uefi/src/Tutorial.inf)
+- mapping `AsanLib` in [Tutorial.dsc](/home/wenzel/Projets/tsffs/examples/tutorials/edk2-uefi/src/Tutorial.dsc)
+- trimming other library choices to a minimal, non-crypto set
+
+The earlier unresolved `__asan_*`, `__ubsan_*`, and `__stack_chk_fail` link errors were therefore a wiring/integration problem, not proof that the runtime was missing from the branch.
+
+## Output layout detail that caused a false failure
+
+One build was reported as failed even though the app had been built successfully.
+
+The real issue was that [build-custom.sh](/home/wenzel/Projets/tsffs/examples/tutorials/edk2-simics-platform/build-custom.sh) copied `Tutorial.efi` from the wrong path inside the Docker image.
+
+The actual build outputs are under:
+
+- `/workspace/Build/Tutorial/DEBUG_CLANGSAN/X64/Tutorial.efi`
+- `/workspace/Build/Tutorial/DEBUG_CLANGSAN/X64/Tutorial.debug`
+- `/workspace/Build/Tutorial/DEBUG_CLANGSAN/Tutorial.map`
+
+The export step was fixed to use those paths.
+
+## Current working state
+
+At the end of this work, the following are true:
+
+1. The ASAN-enabled BIOS build succeeds.
+2. The shell-based BMP playground app build succeeds.
+3. The artifacts are copied into the Simics project:
+   - [BOARDX58ICH10_CUSTOM.fd](/home/wenzel/Projets/tsffs/examples/tutorials/edk2-simics-platform/project/targets/qsp-x86/images/BOARDX58ICH10_CUSTOM.fd)
+   - [Tutorial.efi](/home/wenzel/Projets/tsffs/examples/tutorials/edk2-simics-platform/project/Tutorial.efi)
+   - [Tutorial.map](/home/wenzel/Projets/tsffs/examples/tutorials/edk2-simics-platform/project/Tutorial.map)
+   - [Tutorial.debug](/home/wenzel/Projets/tsffs/examples/tutorials/edk2-simics-platform/project/Tutorial.debug)
+4. [run-custom.simics](/home/wenzel/Projets/tsffs/examples/tutorials/edk2-simics-platform/project/run-custom.simics) boots the custom BIOS and launches `Tutorial.efi`.
+5. [fuzz.simics](/home/wenzel/Projets/tsffs/examples/tutorials/edk2-simics-platform/project/fuzz.simics) was simplified to remove the old `DebugAssert` source-breakpoint logic and now uses only harness start/stop plus exceptions.
+
+## Current fuzzing behavior
+
+The current fuzz campaign is no longer blocked on boot or harness wiring.
+
+The observed TSFFS behavior is:
+
+- `HARNESS_START()` is reached
+- `HARNESS_STOP()` is reached
+- TSFFS cancels the pending timeout event each iteration
+- the current seed completes normally
+
+That means:
+
+- the harness is working
+- the campaign is not actually timing out
+- the current issue is not control flow, but lack of interesting outcomes yet
+
+In TSFFS logs, this appears as:
+
+- `StartBufferPtrSizePtr`
+- then `StopNormal`
+- then cancellation of the scheduled timeout event
+
+So the current setup is already a usable playground for controlled ASAN experiments.
+
+## Where the work stands now
+
+The setup is ready for the next stage:
+
+1. add intentionally bad memory accesses around the BMP parser path
+2. boot and run the shell harness under the ASAN firmware
+3. verify the resulting ASAN report/behavior
+
+Examples of next experiments:
+
+- out-of-bounds read or write on the returned `GopBlt` buffer
+- use-after-free on `GopBlt`
+- stack corruption near the parser call
+
+The key point is that we now have a minimal shell-based target that:
+
+- boots under the ASAN-enabled firmware
+- starts and stops cleanly under TSFFS
+- is simple enough to use as a deliberate ASAN validation playground
+
 ## Why fuzzing still reported "No interesting cases found"
 
 TSFFS started, but then printed:
