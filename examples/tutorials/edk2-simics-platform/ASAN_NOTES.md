@@ -2,6 +2,33 @@
 
 ## Future Investigations
 
+### Internal Shell Boot Option Ordering
+
+Investigate why the tutorial currently needs to insert the internal shell boot option at index `0`.
+
+Current workaround:
+
+- The Dockerfile changes `EfiBootManagerAddLoadOptionVariable (&NewOption, MAX_UINTN)` to `EfiBootManagerAddLoadOptionVariable (&NewOption, 0)` in `BoardBdsHookLib.c`.
+- With `MAX_UINTN`, the internal shell option is appended to `BootOrder`.
+- With `0`, the internal shell option is inserted at the front of `BootOrder`.
+- In the current ASAN firmware plus Simics 7 setup, the shell boot path is reliable only with the index `0` behavior.
+
+What remains unclear:
+
+- Why `qsp.mb.simics_uefi->selected_boot_option = "Internal Shell"` is not sufficient when the shell option is appended.
+- Whether Simics matches the option description but firmware `BootOrder` still wins.
+- Whether `BootNext`, stale NVRAM variables, or existing variable-store state override the Simics-side selection.
+- Whether the ASAN firmware build changes boot option numbering/order enough to expose a Simics target assumption.
+- Whether the internal shell option is registered too late for Simics' selected boot option mechanism unless it is first in `BootOrder`.
+
+Things to verify:
+
+- Dump `BootOrder`, `BootNext`, and all `Boot####` variables before BDS starts selecting a boot option.
+- Compare those variables with and without the index `0` patch.
+- Check when Simics applies `selected_boot_option` relative to firmware boot option registration.
+- Test whether clearing/pinning the variable store makes `selected_boot_option` work without patching `BoardBdsHookLib.c`.
+- Look for a Simics-side way to select or reorder the internal shell option without modifying firmware source.
+
 ### Early `init-tsffs` Firmware Slowdown
 
 Investigate why calling `init-tsffs` at the beginning of `project/run.simics` makes firmware initialization significantly slower.
