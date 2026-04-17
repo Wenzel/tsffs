@@ -1,14 +1,172 @@
 # Copyright (C) 2024 Intel Corporation
 # SPDX-License-Identifier: Apache-2.0
 
-load-target "qsp-x86/uefi-shell" namespace = qsp machine:hardware:firmware:bios = "%simics%/workspace/Build/SimicsOpenBoardPkg/BoardX58Ich10/DEBUG_CLANGSAN/FV/BOARDX58ICH10.fd"
+load-module tsffs
 
-script-branch {
+load-target "qsp-x86/uefi-shell" namespace = qsp machine:software:firmware:bios = "%simics%/workspace/Build/SimicsOpenBoardPkg/BoardX58Ich10/DEBUG_CLANGSAN/FV/BOARDX58ICH10.fd" machine:hardware:processor:class = x86QSP2 machine:hardware:storage:disk0:image = "minimal_boot_disk.craff"
+
+qsp.mb.simics_uefi->selected_boot_option = "Internal Shell"
+
+script-branch "ps2 launch tutorial harness" {
     local $con = qsp.serconsole.con
-    bp.console_string.wait-for $con "Shell>"
-    bp.time.wait-for seconds = .5
-    qsp.serconsole.con.input "help\n"
-    bp.time.wait-for seconds = .5
+
+    bp.console_string.wait-for $con "TSFFS StdinTrace: before WaitForEvent"
+    echo "Typing: map -r"
+    qsp.mb.sb.kbd.key-press "M"
+    bp.time.wait-for seconds = .05
+    qsp.mb.sb.kbd.key-press "A"
+    bp.time.wait-for seconds = .05
+    qsp.mb.sb.kbd.key-press "P"
+    bp.time.wait-for seconds = .05
+    qsp.mb.sb.kbd.key-press "SPACE"
+    bp.time.wait-for seconds = .05
+    qsp.mb.sb.kbd.key-press "MINUS"
+    bp.time.wait-for seconds = .05
+    qsp.mb.sb.kbd.key-press "R"
+    bp.time.wait-for seconds = .05
+    qsp.mb.sb.kbd.key-press "ENTER"
+    bp.console_string.wait-for $con "TSFFS ShellTrace: after DoShellPrompt"
+
+    bp.console_string.wait-for $con "TSFFS StdinTrace: before WaitForEvent"
+    echo "Typing: fs0:"
+    qsp.mb.sb.kbd.key-press "F"
+    bp.time.wait-for seconds = .05
+    qsp.mb.sb.kbd.key-press "S"
+    bp.time.wait-for seconds = .05
+    qsp.mb.sb.kbd.key-press "0"
+    bp.time.wait-for seconds = .05
+    qsp.mb.sb.kbd.key-press "SHIFT_L" "SEMICOLON"
+    bp.time.wait-for seconds = .05
+    qsp.mb.sb.kbd.key-press "ENTER"
+    bp.console_string.wait-for $con "TSFFS ShellTrace: after DoShellPrompt"
+
+    bp.console_string.wait-for $con "TSFFS StdinTrace: before WaitForEvent"
+    local $manager = (start-agent-manager)
+
+    echo "Typing: simicsagent.efi --download tutorial.efi"
+    qsp.mb.sb.kbd.key-press "S"
+    bp.time.wait-for seconds = .05
+    qsp.mb.sb.kbd.key-press "I"
+    bp.time.wait-for seconds = .05
+    qsp.mb.sb.kbd.key-press "M"
+    bp.time.wait-for seconds = .05
+    qsp.mb.sb.kbd.key-press "I"
+    bp.time.wait-for seconds = .05
+    qsp.mb.sb.kbd.key-press "C"
+    bp.time.wait-for seconds = .05
+    qsp.mb.sb.kbd.key-press "S"
+    bp.time.wait-for seconds = .05
+    qsp.mb.sb.kbd.key-press "A"
+    bp.time.wait-for seconds = .05
+    qsp.mb.sb.kbd.key-press "G"
+    bp.time.wait-for seconds = .05
+    qsp.mb.sb.kbd.key-press "E"
+    bp.time.wait-for seconds = .05
+    qsp.mb.sb.kbd.key-press "N"
+    bp.time.wait-for seconds = .05
+    qsp.mb.sb.kbd.key-press "T"
+    bp.time.wait-for seconds = .05
+    qsp.mb.sb.kbd.key-press "PERIOD"
+    bp.time.wait-for seconds = .05
+    qsp.mb.sb.kbd.key-press "E"
+    bp.time.wait-for seconds = .05
+    qsp.mb.sb.kbd.key-press "F"
+    bp.time.wait-for seconds = .05
+    qsp.mb.sb.kbd.key-press "I"
+    bp.time.wait-for seconds = .05
+    qsp.mb.sb.kbd.key-press "SPACE"
+    bp.time.wait-for seconds = .05
+    qsp.mb.sb.kbd.key-press "MINUS"
+    bp.time.wait-for seconds = .05
+    qsp.mb.sb.kbd.key-press "MINUS"
+    bp.time.wait-for seconds = .05
+    qsp.mb.sb.kbd.key-press "D"
+    bp.time.wait-for seconds = .05
+    qsp.mb.sb.kbd.key-press "O"
+    bp.time.wait-for seconds = .05
+    qsp.mb.sb.kbd.key-press "W"
+    bp.time.wait-for seconds = .05
+    qsp.mb.sb.kbd.key-press "N"
+    bp.time.wait-for seconds = .05
+    qsp.mb.sb.kbd.key-press "L"
+    bp.time.wait-for seconds = .05
+    qsp.mb.sb.kbd.key-press "O"
+    bp.time.wait-for seconds = .05
+    qsp.mb.sb.kbd.key-press "A"
+    bp.time.wait-for seconds = .05
+    qsp.mb.sb.kbd.key-press "D"
+    bp.time.wait-for seconds = .05
+    qsp.mb.sb.kbd.key-press "SPACE"
+    bp.time.wait-for seconds = .05
+    qsp.mb.sb.kbd.key-press "T"
+    bp.time.wait-for seconds = .05
+    qsp.mb.sb.kbd.key-press "U"
+    bp.time.wait-for seconds = .05
+    qsp.mb.sb.kbd.key-press "T"
+    bp.time.wait-for seconds = .05
+    qsp.mb.sb.kbd.key-press "O"
+    bp.time.wait-for seconds = .05
+    qsp.mb.sb.kbd.key-press "R"
+    bp.time.wait-for seconds = .05
+    qsp.mb.sb.kbd.key-press "I"
+    bp.time.wait-for seconds = .05
+    qsp.mb.sb.kbd.key-press "A"
+    bp.time.wait-for seconds = .05
+    qsp.mb.sb.kbd.key-press "L"
+    bp.time.wait-for seconds = .05
+    qsp.mb.sb.kbd.key-press "PERIOD"
+    bp.time.wait-for seconds = .05
+    qsp.mb.sb.kbd.key-press "E"
+    bp.time.wait-for seconds = .05
+    qsp.mb.sb.kbd.key-press "F"
+    bp.time.wait-for seconds = .05
+    qsp.mb.sb.kbd.key-press "I"
+    bp.time.wait-for seconds = .05
+    qsp.mb.sb.kbd.key-press "ENTER"
+    bp.console_string.wait-for $con "TSFFS ShellTrace: after DoShellPrompt"
+
+    init-tsffs
+    tsffs.log-level 2
+    @tsffs.start_on_harness = True
+    @tsffs.stop_on_harness = True
+    @tsffs.timeout = 3.0
+    @tsffs.exceptions = [13, 14]
+    @tsffs.corpus_directory = SIM_lookup_file("%simics%/corpus")
+    @tsffs.solutions_directory = SIM_lookup_file("%simics%/solutions")
+
+    bp.console_string.wait-for $con "TSFFS StdinTrace: before WaitForEvent"
+    echo "Typing: tutorial.efi"
+    qsp.mb.sb.kbd.key-press "T"
+    bp.time.wait-for seconds = .05
+    qsp.mb.sb.kbd.key-press "U"
+    bp.time.wait-for seconds = .05
+    qsp.mb.sb.kbd.key-press "T"
+    bp.time.wait-for seconds = .05
+    qsp.mb.sb.kbd.key-press "O"
+    bp.time.wait-for seconds = .05
+    qsp.mb.sb.kbd.key-press "R"
+    bp.time.wait-for seconds = .05
+    qsp.mb.sb.kbd.key-press "I"
+    bp.time.wait-for seconds = .05
+    qsp.mb.sb.kbd.key-press "A"
+    bp.time.wait-for seconds = .05
+    qsp.mb.sb.kbd.key-press "L"
+    bp.time.wait-for seconds = .05
+    qsp.mb.sb.kbd.key-press "PERIOD"
+    bp.time.wait-for seconds = .05
+    qsp.mb.sb.kbd.key-press "E"
+    bp.time.wait-for seconds = .05
+    qsp.mb.sb.kbd.key-press "F"
+    bp.time.wait-for seconds = .05
+    qsp.mb.sb.kbd.key-press "I"
+    bp.time.wait-for seconds = .05
+    qsp.mb.sb.kbd.key-press "ENTER"
+}
+
+script-branch "tutorial harness watchdog" {
+    bp.time.wait-for seconds = 360
+    echo "Tutorial harness launch timed out; stopping"
+    stop
 }
 
 run

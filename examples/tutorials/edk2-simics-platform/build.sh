@@ -13,6 +13,10 @@ CONTAINER_NAME="${IMAGE_NAME}-tmp-${CONTAINER_UID}"
 
 cp "${SCRIPT_DIR}/../../../harness/tsffs.h" "${SCRIPT_DIR}/tsffs.h"
 mkdir -p "${SCRIPT_DIR}/project/"
+cp "${SCRIPT_DIR}/../../rsrc/minimal_boot_disk.craff" "${SCRIPT_DIR}/project/"
+if [ -f "${SCRIPT_DIR}/../edk2-uefi/project/Tutorial.efi" ]; then
+    cp "${SCRIPT_DIR}/../edk2-uefi/project/Tutorial.efi" "${SCRIPT_DIR}/project/tutorial.efi"
+fi
 docker build -t "${IMAGE_NAME}" -f "${DOCKERFILE}" --build-arg "PROJECT=${SCRIPT_DIR}/project/workspace/" "${SCRIPT_DIR}"
 docker create --name "${CONTAINER_NAME}" "${IMAGE_NAME}" bash
 rm -rf "${SCRIPT_DIR}/project/workspace/"

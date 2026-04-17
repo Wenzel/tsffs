@@ -1,3 +1,7 @@
+checkpoint.ckpt
 corpus
+log.json
+minimal_boot_disk.craff
 modules
 solutions
+tutorial.efi
