@@ -1,0 +1,12 @@
+# build artifacts / large binaries - never committed
+*.craff
+*.rom
+*.bin
+*.img
+*.ffs
+*.fd
+edk2/
+openbmc/
+build/
+tmp*/
+.worktrees/

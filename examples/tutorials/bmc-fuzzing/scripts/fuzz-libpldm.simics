@@ -1,0 +1,56 @@
+# Fuzzes libpldm's decode_pldm_firmware_update_package() (PLDM Type 5
+# firmware-update package decoder, DSP0267) via a compiled-in TSFFS harness
+# running directly on the target AST2600 model's Cortex-A7 core.
+#
+# The harness (harness-libpldm/) is a bare-metal ARM32 ELF: it links
+# libpldm's decoder source directly against a few local stubs (memcpy,
+# memcmp, __assert_fail) instead of pulling in a full OpenBMC boot - this
+# validates the same closed decode-a-buffer-into-a-struct target the
+# tutorial's LogoFAIL harness models on the BIOS side, applied to a real
+# OpenBMC daemon-adjacent codebase instead of a synthetic example.
+#
+# Run from a Simics project with the AST2600 model and TSFFS loaded (see the
+# top-level README's "Model dependency" note - this script does not bundle
+# or assume any specific AST2600 package).
+#
+# ./simics --batch-mode /path/to/scripts/fuzz-libpldm.simics
+
+load-module tsffs
+init-tsffs
+
+tsffs.log-level 2
+@tsffs.generate_random_corpus = True
+@tsffs.timeout = 3.0
+
+# ARM exception numbers on the Cortex-A7 core (query with
+# bmc.armcortexa7.core[0].list-exceptions on your own model - these matched
+# on the AST2600 model this was validated against):
+#   0x1 = Data Abort            (~ x86 Page Fault)
+#   0x4 = Prefetch Abort        (~ x86 General Protection Fault, bad-fetch case)
+#   0x5 = Undefined Instruction (also catches jumps into non-code)
+@tsffs.exceptions = [1, 4, 5]
+
+# Boot the standalone AST2600 BMC target far enough to instantiate the
+# arm-cortex-a7 core and its memory map, then stop before OpenBMC firmware
+# in SPI flash gets a chance to run - we don't need or want a full boot for
+# this harness, just the core/memory model.
+run-script "targets/ast2600/bmc.simics"
+
+stop
+
+# The core comes out of bmc-pre.include's board-level reset sequencing with
+# a pending Reset exception queued. Stepping once retires it before we
+# hijack PC; skipping this makes the first instruction at the injected entry
+# point get swallowed by the stale exception instead of executing.
+bmc.armcortexa7.core[0].force-step-instruction 1
+
+# Load the harness ELF directly into BMC DDR (0x80000000, its link address -
+# see harness-libpldm/src/link.ld) and point the core at it instead of
+# whatever firmware would otherwise be in SPI flash.
+$entry = (bmc.armcortexa7.core[0].load-binary "%simics%/../openbmc-ast2600/harness-libpldm/pldm_fw_update_harness.elf")
+bmc.armcortexa7.core[0].set-pc $entry
+
+echo "Loaded pldm_fw_update_harness.elf, entry = "
+print $entry
+
+run

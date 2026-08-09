@@ -1,0 +1,48 @@
+# Boots the public X58I EDK2 BIOS and the public OpenBMC (evb-ast2600)
+# image side by side in one Simics session, with no interconnect wired
+# between them yet (that wiring is future work per the top-level README).
+#
+# Run from a Simics project that has:
+#   - packages 1000 (Simics-Base), 2096 (QSP-x86), 8112 (QSP-CPU), 1030
+#     (Crypto-Engine) at matching Simics-7 versions
+#   - the ASPEED AST2600 model package (9806, or your own equivalent - see
+#     the top-level README's "Model dependency" note) and its own
+#     dependencies (this repo was validated against Intel's internal
+#     package, which additionally needed infra-tools, testingframework,
+#     arm-cpu, arm-juno, synopsys-dw, and a server-platform package for its
+#     release-helper module - your model's own docs will list its actual
+#     dependencies)
+#   - bios-x58i/project/targets/qsp-x86/qsp-uefi-custom.target.yml[.include]
+#     copied into this project's own targets/qsp-x86/
+#
+# Pass this repo's absolute path as $repo_root, then run:
+#   ./simics -no-gui --no-win \
+#       -e '$repo_root = "/absolute/path/to/tsffs/examples/tutorials/bmc-fuzzing"' \
+#       /path/to/scripts/combined-boot.simics
+
+@conf.sim.stop_on_error = False
+@conf.sim.handle_outside_memory = True
+
+# --- BIOS side: X58I EDK2 BIOS, boots to the boot menu (no interconnect,
+# so it just sits there once booted - see bios-x58i/project/run.simics for
+# the version that also automates entering the UEFI shell). Note the
+# firmware param path is machine:software:firmware:bios here, not
+# machine:hardware:firmware:bios as in bios-x58i/project/run.simics - both
+# resolve to the same underlying parameter (hardware:...:bios is defined as
+# a ^machine:software:firmware:bios reference in the target yml), but only
+# the software: leaf reliably accepted an override when loaded alongside
+# the BMC target in the same session. ---
+load-target "qsp-x86/qsp-uefi-custom" namespace = qsp machine:software:firmware:bios = ($repo_root + "/bios-x58i/project/workspace/Build/SimicsOpenBoardPkg/BoardX58Ich10/DEBUG_GCC/FV/BOARDX58ICH10.fd")
+
+# --- BMC side: OpenBMC (evb-ast2600), boots to the login prompt. ---
+$bmc_fw = ($repo_root + "/openbmc-ast2600/project/deploy/obmc-phosphor-image-evb-ast2600.static.mtd")
+$spi_flash_size_Mb = 64
+$bmc_auto_boot = FALSE
+run-script "targets/ast2600/bmc.simics"
+
+script-branch {
+    bp.console_string.wait-for $bmc.debugconsole.con "ast#"
+    $bmc.debugconsole.con.input "run bootspi\n"
+}
+
+run

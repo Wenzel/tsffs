@@ -1,0 +1,43 @@
+# Boots the OpenBMC image built by openbmc-ast2600/build.sh on a
+# user-supplied ASPEED AST2600 Simics model (see ../../README.md's "Model
+# dependency" section - the model itself is not distributed in this repo).
+#
+# Prerequisites (adjust to your own AST2600 model package):
+#   - A Simics project with the AST2600 model's own target script available
+#     at targets/ast2600/bmc.simics (this is the layout Intel's internal
+#     ASPEED package and several public/eval AST2600 packages use).
+#   - Run from that project's directory, e.g.:
+#       ./simics -no-gui --no-win \
+#           /path/to/openbmc-ast2600/scripts/boot.simics
+#
+# What this script does, and why:
+#   - Points $bmc_fw at the locally built flash image instead of any
+#     packaged/Artifactory default.
+#   - $spi_flash_size_Mb = 64 matches the 64MB static.mtd image size exactly
+#     (see meta-evb-ast2600's FLASH_SIZE = "65536" KB); a mismatch here
+#     truncates or misaligns the image.
+#   - handle_outside_memory / stop_on_error: this OpenBMC build touches a
+#     couple of registers most AST2600 models won't implement (see the
+#     kernel bbappend fixes in openbmc-ast2600/) - these settings let the
+#     simulation continue past isolated unmapped-access warnings instead of
+#     halting.
+#   - $bmc_auto_boot = FALSE plus the script-branch below: skips this
+#     project's own default auto-boot injection (which may assume a
+#     different, Intel-internal firmware layout) and instead runs the
+#     board's actual default boot command once at the u-boot prompt.
+
+@conf.sim.stop_on_error = False
+@conf.sim.handle_outside_memory = True
+
+$bmc_fw = "%simics%/../openbmc-ast2600/project/deploy/obmc-phosphor-image-evb-ast2600.static.mtd"
+$spi_flash_size_Mb = 64
+$bmc_auto_boot = FALSE
+
+run-script "targets/ast2600/bmc.simics"
+
+script-branch {
+    bp.console_string.wait-for $bmc.debugconsole.con "ast#"
+    $bmc.debugconsole.con.input "run bootspi\n"
+}
+
+run
