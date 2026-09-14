@@ -47,11 +47,15 @@ use gimli::{
 use intervaltree::Element;
 use object::{Object, ObjectSection};
 
-use crate::{
-    os::windows::debug_info::{LineInfo, SymbolInfo},
-    source_cov::SourceCache,
-    traits::DebugInfoModule,
-};
+use crate::source_cov::SourceCache;
+
+// Re-exported (rather than left as a plain `use`) so that `tests/dwarf_fixture.rs`
+// -- a separate crate, since it's an integration test -- can name these as
+// `tsffs::dwarf::{SymbolInfo, LineInfo, DebugInfoModule}` without requiring all of
+// `crate::os` (Windows kernel/PDB internals) or `crate::traits` (which also holds
+// the unrelated `TracerDisassembler` trait) to be made public too.
+pub use crate::os::windows::debug_info::{LineInfo, SymbolInfo};
+pub use crate::traits::DebugInfoModule;
 
 /// A UEFI/SMM module's DWARF/ELF debug info, resolved into the same
 /// [`SymbolInfo`]/[`LineInfo`] shape the PDB backend produces.
@@ -353,10 +357,9 @@ impl<'data> DebugInfoModule for DwarfModule<'data> {
     }
 }
 
-#[cfg(test)]
-mod test {
-    // NOTE: The DWARF test fixture (an EDK2 GCC5-built UEFI module's `.debug` ELF
-    // file, plus its source) does not exist yet -- fixture creation and the actual
-    // unit test(s) exercising `DwarfModule::intervals` end-to-end are tracked
-    // separately and intentionally not part of this change.
-}
+// NOTE: There is intentionally no `#[cfg(test)] mod test` here. `[lib] test = false`
+// in Cargo.toml disables the implicit unit-test harness for *this* (library) target,
+// so `#[cfg(test)]` code in this file is never compiled by any `cargo test`
+// invocation. The offline end-to-end test of `DwarfModule::intervals` (against a
+// synthetic ELF+DWARF fixture built with WSL gcc) lives in `tests/dwarf_fixture.rs`
+// instead, which is a separate cargo target/crate not affected by `test = false`.
