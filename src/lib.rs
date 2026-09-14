@@ -89,14 +89,23 @@ use typed_builder::TypedBuilder;
 use versions::{Requirement, Versioning};
 
 pub(crate) mod arch;
-pub(crate) mod dwarf;
+// `pub` (not `pub(crate)`): needed so the offline DWARF fixture test in
+// `tests/dwarf_fixture.rs` (a separate cargo target/crate, since `[lib] test = false`
+// means unit tests can't live inside this crate -- see that file's module doc) can
+// reach `DwarfModule`/`DebugInfoModule`/`SourceCache` at all. `os` and `traits`
+// stay `pub(crate)`; `dwarf::mod.rs` re-exports just the debug-info types
+// (`SymbolInfo`/`LineInfo`) and the `DebugInfoModule` trait the test needs,
+// instead of widening all of `os` (Windows kernel/PDB internals) or `traits`
+// (which also holds the unrelated, and itself not-fully-public,
+// `TracerDisassembler` trait).
+pub mod dwarf;
 pub(crate) mod fuzzer;
 pub(crate) mod haps;
 pub(crate) mod interfaces;
 pub(crate) mod log;
 pub(crate) mod magic;
 pub(crate) mod os;
-pub(crate) mod source_cov;
+pub mod source_cov;
 pub(crate) mod state;
 pub(crate) mod tracer;
 pub(crate) mod traits;
