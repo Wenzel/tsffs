@@ -9,7 +9,6 @@ use md5::compute;
 use pdb::{FileChecksum, FileInfo};
 use sha1::{Digest, Sha1};
 use sha2::Sha256;
-use simics::{debug, get_object};
 use typed_path::{TypedComponent, TypedPath, UnixComponent, WindowsComponent};
 use walkdir::WalkDir;
 
@@ -64,10 +63,6 @@ impl SourceCache {
                 prefix_lookup.insert(components.clone(), path.clone());
                 components.remove(0);
             }
-        }
-
-        if let Ok(o) = get_object("tsffs") {
-            debug!(o, "Cached {} source files", file_paths.len());
         }
 
         Ok(Self {
