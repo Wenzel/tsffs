@@ -130,4 +130,25 @@ impl SourceCache {
                 .or_else(|| self.lookup_file_name_components(file_name)),
         })
     }
+
+    /// Look up a source file referenced from a DWARF line number program, mirroring
+    /// `lookup_pdb`. DWARF5 line-number program headers may carry an optional
+    /// `DW_LNCT_MD5` checksum entry per file (`gimli`'s `FileEntry::md5`, valid only
+    /// when `LineProgramHeader::file_has_md5` returns `true`); when present, we try
+    /// that checksum against the same MD5 table populated by `SourceCache::new`
+    /// (which hashes every candidate source file with MD5/SHA1/SHA256 up front).
+    /// DWARF doesn't specify SHA1/SHA256 file checksums, so there's nothing to try
+    /// there. If there's no MD5 (DWARF <= 4, or a DWARF5 producer that omitted it,
+    /// e.g. some EDK2 GCC5 builds), we fall back to the same format-agnostic
+    /// path-suffix lookup PDB uses.
+    pub fn lookup_dwarf(&self, md5: Option<&[u8; 16]>, file_name: &str) -> Result<Option<&Path>> {
+        Ok(match md5 {
+            Some(m) => self
+                .md5_lookup
+                .get(m.as_slice())
+                .map(|p| p.as_path())
+                .or_else(|| self.lookup_file_name_components(file_name)),
+            None => self.lookup_file_name_components(file_name),
+        })
+    }
 }

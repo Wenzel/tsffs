@@ -89,6 +89,7 @@ use typed_builder::TypedBuilder;
 use versions::{Requirement, Versioning};
 
 pub(crate) mod arch;
+pub(crate) mod dwarf;
 pub(crate) mod fuzzer;
 pub(crate) mod haps;
 pub(crate) mod interfaces;
