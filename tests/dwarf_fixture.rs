@@ -92,17 +92,26 @@
 //! done later by whoever has Simics + a real `.debug` file (e.g. on the
 //! `vmsifter` host).
 //!
-//! Separately: full `cargo test`/`cargo build` in this repo currently fails at the
-//! link step on this Windows dev machine (`link.exe` exit code 1107, "invalid or
-//! corrupt file", linking directly against `libsimics-common.dll`) regardless of
-//! which locally-installed Simics package version is selected via `SIMICS_BASE`
-//! (confirmed against both `simics-7.84.0` and `simics-7.70.0`) and regardless of
-//! whether the crate has any of *this* task's changes at all (phase 1 already
-//! confirmed this on a pristine `main` checkout in an isolated worktree). This is a
-//! pre-existing, environmental MSVC/Simics-packaging issue, out of scope for this
-//! milestone. `cargo check --tests` (type-check only, no linking) is therefore the
-//! validation bar actually available on this machine for this test, matching how
-//! phase 1 validated `src/dwarf/mod.rs` itself with `cargo check --lib`.
+//! Separately: linking this crate with the default `x86_64-pc-windows-msvc` host
+//! target fails (`link.exe` exit code 1107, "invalid or corrupt file") because
+//! `simics-build-utils` emits a `cargo:rustc-link-lib=dylib:+verbatim=...dll`
+//! directive that only MinGW's `ld` understands, not MSVC's `link.exe`. Building
+//! and testing with the GNU host target instead (`cargo test --target
+//! x86_64-pc-windows-gnu --test dwarf_fixture`, MinGW-w64 `gcc`/`ld` on `PATH`,
+//! `SIMICS_BASE` pointed at a local Simics install) links and runs this test
+//! successfully, matching the CI `build_windows` job in `.github/workflows/ci.yml`.
+//! At runtime, the Simics package's own `win64/bin` directory (containing
+//! `libsimics-common.dll`/`libvtutils.dll`) must also be on `PATH`.
+//!
+//! `SourceCache::new` originally also called into a Simics FFI object lookup
+//! (`get_object("tsffs")`) purely to emit a debug log line, guarded with
+//! `if let Ok(o) = ...` on the assumption that a missing live Simics session would
+//! just produce an `Err`. In practice, calling any `SIM_*` API entry point with no
+//! Simics kernel initialized (as here, a plain `.exe` linking directly against
+//! `libsimics-common.dll`) hard-aborts the process from inside the DLL itself,
+//! before the FFI call can return `Err` -- so that debug log line has been removed
+//! from `SourceCache::new` to make it actually usable offline, as this test
+//! requires.
 
 use std::{fs::read, path::PathBuf};
 
