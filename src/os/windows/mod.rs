@@ -285,3 +285,19 @@ impl Tsffs {
         Ok(())
     }
 }
+
+// SPIKE (UCOV-M2, resolved, no code to keep): checked whether the `simics`
+// v0.2.6 crate auto-generates a safe wrapper for an `osa_target_info`
+// interface (to fetch UEFI/SMM module base+debug-info via
+// `SIM_get_interface(..., "osa_target_info").memory_map()`, mirroring
+// ProcessorInfoV2Interface/IntRegisterInterface above). Result: it does not
+// exist. No `osa_target_info` header exists under `$SIMICS_BASE/src/include`
+// in Simics 6.0.185, 7.70.0, or 7.84.0, so bindgen never emits an
+// `osa_target_info_interface_t`, and the `simics` crate's generated
+// `interfaces.rs` has no `OsaTargetInfoInterface` (confirmed both by grepping
+// the freshly-regenerated bindings and by a `cargo check` of
+// `simics::api::OsaTargetInfoInterface`, which fails with E0412 - rustc's
+// only "similarly named" suggestion is the unrelated `VgaTextInfoInterface`).
+// Module discovery for the DWARF source-coverage work must go through the
+// CLI-string round-trip (`quiet_run_command('$system.soft.tracker.list-modules
+// max = 400')`) instead; there is no native FFI shortcut via this interface.
