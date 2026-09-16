@@ -111,6 +111,7 @@ command-ext = "0.1.2"
 indoc = "2.0.5"
 ispm-wrapper = "0.2.6"
 versions = { version = "6.2.0", features = ["serde"] }
+tempfile = "3.13.0"
 
 [build-dependencies]
 simics = "0.2.6"

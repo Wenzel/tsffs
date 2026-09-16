@@ -99,6 +99,16 @@ pub(crate) mod source_cov;
 pub(crate) mod state;
 pub(crate) mod tracer;
 pub(crate) mod traits;
+// `pub` (not `pub(crate)`): needed so the offline UEFI module discovery fixture
+// test in `tests/uefi_module_discovery_fixture.rs` (UCOV-M2, milestone-scope steps
+// 1-2 -- see that file's module doc) can reach `uefi::{parse_module_list,
+// UefiOsInfo}` at all. This is a separate cargo target/crate (this crate's `[lib]`
+// section sets `test = false`, so `#[cfg(test)]` code inside `src/` is never
+// compiled by `cargo test`), so it only sees this crate's `pub` API -- the same
+// reason the sibling DWARF milestone widened `dwarf`/`source_cov` similarly.
+// `util` (which `uefi` itself depends on for `PathSuffixIndex`) stays
+// `pub(crate)`, since the test doesn't need to reach it directly.
+pub mod uefi;
 pub(crate) mod util;
 
 /// The class name used for all operations interfacing with SIMICS
