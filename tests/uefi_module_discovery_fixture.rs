@@ -471,7 +471,7 @@ fn falls_back_to_stem_match_and_warns_on_ambiguity_when_suffix_match_fails() -> 
 }
 
 #[test]
-fn resolve_fails_gracefully_not_panics_for_pathless_unknown_module() -> Result<()> {
+fn resolve_skips_gracefully_not_panics_for_pathless_unknown_module() -> Result<()> {
     let tmp = tempdir()?;
     let root = tmp.path();
 
@@ -482,13 +482,60 @@ fn resolve_fails_gracefully_not_panics_for_pathless_unknown_module() -> Result<(
         .collect::<Vec<_>>();
     assert_eq!(modules.len(), 1);
 
-    // Resolving a genuinely pathless ("unknown module") row must fail cleanly
-    // (a `Result::Err`, caught here, not a panic/process abort) -- graceful
-    // fallback, not a crash or silent misparse.
-    let result = UefiOsInfo::resolve(&modules, root);
+    // Resolving a genuinely pathless ("unknown module") row must not panic or
+    // abort the batch (a real `tracker_obj->maps` capture always has at least
+    // one such row -- see UefiOsInfo::resolve's doc comment) -- it's skipped
+    // with a warning, leaving an empty (not missing) result.
+    let info = UefiOsInfo::resolve(&modules, root)?;
     assert!(
-        result.is_err(),
-        "resolving an unknown/pathless module must return an Err, not silently succeed"
+        info.modules.is_empty(),
+        "an unknown/pathless module must be skipped, not resolved to a bogus path"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn resolve_skips_only_the_unresolvable_module_in_a_mixed_batch() -> Result<()> {
+    // The real-world case this guards: a real tracker_obj->maps capture is a
+    // mix of resolvable and genuinely pathless modules (confirmed live on
+    // vmsifter: 66 resolvable real modules plus 1 pathless "<unknown>" one, in
+    // a single 67-row capture). One unresolvable module must not discard
+    // source coverage for every other resolvable module in the same batch.
+    let tmp = tempdir()?;
+    let root = tmp.path();
+
+    let rows = fixture_rows();
+    let modules = parse_module_list(&fixture_attr_value(&rows))?;
+    let resolvable_count = modules
+        .iter()
+        .filter(|(name, ..)| name != UNKNOWN_MODULE_NAME)
+        .count();
+
+    for (name, _base, _size, embedded_path) in &modules {
+        if name == UNKNOWN_MODULE_NAME {
+            continue;
+        }
+        let suffix = embedded_path
+            .to_string_lossy()
+            .rsplit_once("DEBUG_GCC/")
+            .expect("fixture embedded path contains the DEBUG_GCC/ prefix marker")
+            .1
+            .to_string();
+        let local_path = root.join(suffix);
+        create_dir_all(
+            local_path
+                .parent()
+                .expect("local fixture path has a parent directory"),
+        )?;
+        write(&local_path, b"contents")?;
+    }
+
+    let info = UefiOsInfo::resolve(&modules, root)?;
+    assert_eq!(
+        info.modules.len(),
+        resolvable_count,
+        "every resolvable module in the batch must still resolve despite the one unresolvable module"
     );
 
     Ok(())
