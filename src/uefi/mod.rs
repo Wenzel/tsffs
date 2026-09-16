@@ -10,20 +10,23 @@
 //! against the Simics 6/7 headers). The confirmed-real mechanism, found via a
 //! live investigation on vmsifter (real Simics 6.0.189 session, a real
 //! checkpoint past DXE dispatch, 68 real loaded UEFI modules), is the
-//! `uefi_fw_tracker` component's underlying C object's `maps` attribute, reached
-//! from Rust via Simics's CLI arrow-attribute syntax and the exact same FFI
-//! entry point TSFFS already uses elsewhere in this module's design:
-//! `simics::api::simulator::script::run_command(String) -> Result<AttrValue>`
-//! (e.g. `run_command("qsp.software.tracker.tracker_obj->maps")`, where the
-//! `qsp.software.tracker` object path is board-specific and must be supplied by
-//! the caller, not hardcoded). This supersedes an earlier design that queried the
-//! tracker's `list-modules` CLI command instead: `list-modules` itself calls
-//! `basename()` on the underlying data before returning it, so it only ever
-//! yields a bare filename, never a full path -- `tracker_obj->maps` is the same
-//! underlying data with the full path intact. Calling `run_command` for real,
-//! and everything downstream of it (wiring into `crate::haps`/`HARNESS_START`, a
-//! `self.uefi` attribute on `Tsffs`, touching the OS enum), is explicitly out of
-//! scope for this milestone -- see the UCOV-M2 spec's milestone-scope step 3.
+//! `uefi_fw_tracker` component's underlying C object's `maps` attribute. This
+//! supersedes an earlier design that queried the tracker's `list-modules` CLI
+//! command instead: `list-modules` itself calls `basename()` on the underlying
+//! data before returning it, so it only ever yields a bare filename, never a
+//! full path -- `tracker_obj`'s `maps` attribute is the same underlying data
+//! with the full path intact.
+//!
+//! `maps` is read via `simics::{get_object, get_attribute}` (`SIM_get_attribute`
+//! on the object `get_object(tracker_object)` resolves to), not via Simics's CLI
+//! arrow-attribute syntax (`run_command("{tracker_object}->maps")`). An earlier
+//! revision of this module used the `run_command` string-command path; live
+//! validation on vmsifter (real QSP boot, `HARNESS_START` firing well into DXE
+//! dispatch with ~30 real modules already loaded) confirmed that path returns a
+//! stale/near-empty result (3 elements, all `AttrValueType::Invalid`) at a point
+//! in boot where a direct attribute read of the exact same object returns the
+//! real, fully-populated list (67 real rows) -- the live data was always there;
+//! the CLI string-command round-trip was the bug.
 //!
 //! This module implements only the two pieces of that spec that are testable
 //! completely offline, with no live Simics session and no real BIOS/UEFI image:
@@ -38,7 +41,7 @@
 //!
 //! `simics::AttrValue` is a `#[repr(C)]` wrapper around the C `attr_value_t`
 //! union (see `simics::api::base::attr_value`). Reading a real, already-populated
-//! `AttrValue` (e.g. one actually returned by `run_command`) is safe pure memory
+//! `AttrValue` (e.g. one actually returned by `get_attribute`) is safe pure memory
 //! access with no FFI call (`AttrValue::as_heterogeneous_list`/`as_heterogeneous_dict`
 //! just walk `private_u.list`/`private_u.dict` pointers). But *constructing* an
 //! owned `AttrValue::List`/`AttrValue::Dict` from scratch (e.g. `AttrValue::list(n)`,
@@ -54,7 +57,7 @@
 //! Dict(BTreeMap<Self, Self>)`) has no such constructors -- its variants are built
 //! with plain Rust syntax, no FFI at all -- so it is what this module's parser
 //! takes, and what the offline tests construct fixtures as. At a real call site,
-//! converting the real `AttrValue` returned by `run_command` into `AttrValueType`
+//! converting the real `AttrValue` returned by `get_attribute` into `AttrValueType`
 //! via `.into()` (`impl From<AttrValue> for AttrValueType`) is the safe, pure-read
 //! conversion described above; this module never needs to go the other direction.
 //!
@@ -63,7 +66,7 @@
 //! Unlike the superseded `list-modules`-based design (which had to *assume* a
 //! shape, since it was never actually queried live), this shape is a confirmed
 //! fact, captured from a real live vmsifter tracker dump reached from Rust via
-//! `run_command`, using the exact same FFI path this module documents above:
+//! `get_attribute`, using the exact same FFI path this module documents above:
 //!
 //! - The top-level value is a `List` of rows.
 //! - Each row is itself a positional `List` of exactly 7 elements (**not** a dict
@@ -129,7 +132,7 @@ use std::{
 use anyhow::{anyhow, bail, Result};
 use intervaltree::Element;
 use object::File as ObjectFile;
-use simics::{free_attribute, get_object, run_command, AttrValueType};
+use simics::{free_attribute, get_attribute, get_object, AttrValueType};
 use tracing::{debug, warn};
 use walkdir::WalkDir;
 
@@ -454,7 +457,16 @@ pub fn collect_symbols<P>(
 where
     P: AsRef<Path>,
 {
-    let maps = run_command(format!("{tracker_object}->maps"))?;
+    // Read `maps` via `SIM_get_attribute` (`get_object` + `get_attribute`), not
+    // `run_command("{tracker_object}->maps")`. The CLI string-command path was
+    // confirmed live (vmsifter, real QSP boot) to return a near-empty/stale
+    // result (3 elements, all `Invalid`) at a point in boot where a direct
+    // attribute read of the exact same object/attribute already returns the
+    // real, fully-populated list (67 real rows) -- the live data is there:
+    // `run_command`'s string-command round-trip was the actual bug, not a
+    // tracker-timing issue.
+    let tracker_conf_object = get_object(tracker_object)?;
+    let maps = get_attribute(tracker_conf_object, "maps")?;
     let value = AttrValueType::from(maps);
     free_attribute(maps)?;
 
