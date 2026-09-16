@@ -1041,7 +1041,7 @@ impl Tsffs {
     }
 
     pub fn save_symbolic_coverage(&mut self) -> Result<()> {
-        if self.symbolic_coverage_directory.is_dir() {
+        if !self.symbolic_coverage_directory.is_dir() {
             create_dir_all(&self.symbolic_coverage_directory)?;
         }
 
