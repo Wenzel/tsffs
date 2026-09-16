@@ -465,6 +465,23 @@ pub(crate) struct Tsffs {
     /// Directory in which source files are located. Source files do not need to be arranged in
     /// the same directory structure as the compiled source, and are looked up by hash.
     pub symbolic_coverage_directory: PathBuf,
+    #[class(attribute(optional, default = false))]
+    /// Whether UEFI/SMM is being run in the simulation. When set with
+    /// `symbolic_coverage`, TSFFS collects source coverage for UEFI/SMM modules at
+    /// `HARNESS_START` by querying `uefi_tracker_object`'s loaded module list and
+    /// resolving each module's DWARF debug info under `uefi_debug_info_directory`.
+    pub uefi: bool,
+    #[class(attribute(optional, default = String::new()))]
+    /// The Simics object path of the UEFI/SMM module tracker to query for the loaded
+    /// module list (e.g. `board.software.tracker.tracker_obj`, queried via its
+    /// `->maps` attribute), used when `uefi` is set. Board-specific; there is no
+    /// default.
+    pub uefi_tracker_object: String,
+    #[class(attribute(optional, default = lookup_file("%simics%")?.join("uefi-debug-info")))]
+    /// Local build-output directory that UEFI/SMM modules' embedded build-machine
+    /// paths (reported by `uefi_tracker_object`) are resolved against, to locate
+    /// each module's local `.debug` DWARF sidecar file, used when `uefi` is set.
+    pub uefi_debug_info_directory: PathBuf,
 
     /// Handle for the core simulation stopped hap
     stop_hap_handle: HapHandle,
