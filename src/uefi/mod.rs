@@ -86,16 +86,25 @@
 //!     address also present in the real data, but out of scope for this
 //!     milestone -- nothing downstream of this module currently consumes it.)
 //!   - index 1 (`loaded_size`) -> `Unsigned`/`Signed`: the module's size in bytes.
-//!   - index 6 (`full_path_string`) -> `String`, **or absent/empty**: the
-//!     module's full embedded build-machine path. Some rows genuinely have no
-//!     path at all -- real "unknown"/unresolved modules that the tracker could
-//!     not identify (mirroring `module_load.py`'s own upstream guard for
-//!     `m['image'] is None`) -- represented here as an empty string. Unlike the
-//!     superseded design, there is no separate "name" field at all: with this
-//!     row shape, a module's short display name must be *derived* from the full
-//!     path via [`Path::file_name`] when a path is present, e.g. `DxeCore.efi`
-//!     from the example above. See [`parse_module_row`] for how a missing/empty
-//!     path is named instead (`<unknown>`).
+//!   - index 6 (`full_path_string`) -> `String`, **or absent**: the module's
+//!     full embedded build-machine path. Some rows genuinely have no path at
+//!     all -- real "unknown"/unresolved modules that the tracker could not
+//!     identify (mirroring `module_load.py`'s own upstream guard for
+//!     `m['image'] is None`). Confirmed live on vmsifter against the real,
+//!     full 68-row `tracker_obj->maps` capture (not just the samples from the
+//!     initial investigation): exactly one real row (of 68) is genuinely
+//!     pathless, and its Python value is `None`, not an empty string -- which
+//!     `simics::AttrValueType::from(AttrValue)` (`is_nil()` checked first)
+//!     converts to `AttrValueType::Nil`, **not** `AttrValueType::String(String::new())`.
+//!     An earlier revision of this module assumed the latter (an empty
+//!     string) and hard-errored on the real `Nil` case; [`list_get_string_or_nil`]
+//!     now accepts both `Nil` and (defensively) an empty `String` as "no
+//!     path". Unlike the superseded design, there is no separate "name" field
+//!     at all: with this row shape, a module's short display name must be
+//!     *derived* from the full path via [`Path::file_name`] when a path is
+//!     present, e.g. `DxeCore.efi` from the example above. See
+//!     [`parse_module_row`] for how a missing path is named instead
+//!     (`<unknown>`).
 //!   - indices 2, 4, 5 (the two booleans and `adjusted_size`) are not read by
 //!     this module; they are out of scope for this milestone.
 //!
@@ -167,28 +176,32 @@ fn parse_module_row(row: &AttrValueType) -> Result<(String, u64, u64, PathBuf)> 
 
     let base = list_get_unsigned(&loaded_address, 0)?;
     let size = list_get_unsigned(&loaded_size, 1)?;
-    let embedded_path_str = list_get_string(&full_path, 6)?;
+    let embedded_path_str = list_get_string_or_nil(&full_path, 6)?;
 
-    // A row with a genuinely unresolved module is represented as an empty (or
-    // absent -- but this variant of `AttrValueType` can only be empty, not
-    // absent) path string -- see the module doc comment. Treat that as "no
-    // path" and fall back to a fixed placeholder name rather than deriving an
-    // empty/panic-inducing name from it.
-    let (name, embedded_path) = if embedded_path_str.is_empty() {
-        (UNKNOWN_MODULE_NAME.to_string(), PathBuf::new())
-    } else {
-        let embedded_path = PathBuf::from(&embedded_path_str);
-        let name = embedded_path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .map(str::to_string)
-            .ok_or_else(|| {
-                anyhow!(
-                    "embedded path {:?} in tracker_obj->maps row has no file name component",
-                    embedded_path
-                )
-            })?;
-        (name, embedded_path)
+    // A row with a genuinely unresolved module has no path at all -- confirmed
+    // live against the real, full 68-row capture to be represented as
+    // `AttrValueType::Nil` (Python `None`), not an empty string -- see the
+    // module doc comment's "Confirmed shape" section. `list_get_string_or_nil`
+    // also defensively accepts an empty string as "no path", in case some
+    // other tracker/board configuration ever produces one instead of `Nil`.
+    // Treat either as "no path" and fall back to a fixed placeholder name
+    // rather than deriving an empty/panic-inducing name from it.
+    let (name, embedded_path) = match embedded_path_str.filter(|s| !s.is_empty()) {
+        None => (UNKNOWN_MODULE_NAME.to_string(), PathBuf::new()),
+        Some(embedded_path_str) => {
+            let embedded_path = PathBuf::from(&embedded_path_str);
+            let name = embedded_path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .map(str::to_string)
+                .ok_or_else(|| {
+                    anyhow!(
+                        "embedded path {:?} in tracker_obj->maps row has no file name component",
+                        embedded_path
+                    )
+                })?;
+            (name, embedded_path)
+        }
     };
 
     Ok((name, base, size, embedded_path))
@@ -208,14 +221,18 @@ fn list_get_unsigned(element: &AttrValueType, index: usize) -> Result<u64> {
     }
 }
 
-/// Read a positional `tracker_obj->maps` row element expected to be a string,
-/// i.e. `full_path_string`. `index` is only used to produce a helpful error
-/// message.
-fn list_get_string(element: &AttrValueType, index: usize) -> Result<String> {
+/// Read a positional `tracker_obj->maps` row element expected to be either a
+/// string or absent, i.e. `full_path_string`. Returns `Ok(None)` for a
+/// genuinely pathless row -- confirmed live (see the module doc comment) to
+/// arrive as `AttrValueType::Nil` (Python `None`), not an empty string, though
+/// an empty string is also accepted defensively and treated the same as `Nil`.
+/// `index` is only used to produce a helpful error message.
+fn list_get_string_or_nil(element: &AttrValueType, index: usize) -> Result<Option<String>> {
     match element {
-        AttrValueType::String(s) => Ok(s.clone()),
+        AttrValueType::String(s) => Ok(Some(s.clone())),
+        AttrValueType::Nil => Ok(None),
         other => bail!(
-            "expected tracker_obj->maps row element {index} to be a String, got {:?}",
+            "expected tracker_obj->maps row element {index} to be a String or Nil, got {:?}",
             other
         ),
     }

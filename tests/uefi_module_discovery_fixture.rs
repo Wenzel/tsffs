@@ -50,10 +50,12 @@
 //!   ambiguity when it exists, which the `BootScriptExecutorDxe.efi` case above
 //!   does not exercise (its two instances share one path, so a resolver that
 //!   ignored the path entirely would pass that case by accident).
-//! - An unknown/unresolved module with no embedded path at all (empty string),
-//!   confirming `parse_module_list` names it [`tsffs::uefi::UNKNOWN_MODULE_NAME`]
-//!   without panicking or misparsing, and that `UefiOsInfo::resolve` fails that
-//!   one module gracefully (a clear `Err`, not a panic) rather than guessing.
+//! - An unknown/unresolved module with no embedded path at all
+//!   (`AttrValueType::Nil`, matching the real capture -- see
+//!   `fixture_attr_value`'s doc comment), confirming `parse_module_list` names
+//!   it [`tsffs::uefi::UNKNOWN_MODULE_NAME`] without panicking or misparsing,
+//!   and that `UefiOsInfo::resolve` fails that one module gracefully (a clear
+//!   `Err`, not a panic) rather than guessing.
 
 use std::{
     collections::HashMap,
@@ -144,7 +146,13 @@ fn fixture_rows() -> Vec<FixtureRow> {
 /// adjusted_address, adjusted_size, <bool>, full_path_string]`. `adjusted_address`
 /// is fabricated equal to `loaded_address` and `adjusted_size` equal to
 /// `loaded_size`, and both booleans fabricated `true`, since this module doesn't
-/// read those fields at all (see the module doc comment).
+/// read those fields at all (see the module doc comment). A `None`
+/// `embedded_path` becomes `AttrValueType::Nil`, not `AttrValueType::String(String::new())`
+/// -- validated live on vmsifter against the real, full 68-row capture: the one
+/// genuinely pathless row's Python value is `None`, which converts to
+/// `AttrValueType::Nil` via `simics::AttrValueType::from(AttrValue)`'s `is_nil()`
+/// check. An earlier revision of this fixture used an empty string instead,
+/// which the real capture showed does not match what Simics actually returns.
 fn fixture_attr_value(rows: &[FixtureRow]) -> AttrValueType {
     AttrValueType::List(
         rows.iter()
@@ -156,7 +164,10 @@ fn fixture_attr_value(rows: &[FixtureRow]) -> AttrValueType {
                     AttrValueType::Unsigned(row.base),
                     AttrValueType::Unsigned(row.size),
                     AttrValueType::Bool(true),
-                    AttrValueType::String(row.embedded_path.clone().unwrap_or_default()),
+                    match &row.embedded_path {
+                        Some(path) => AttrValueType::String(path.clone()),
+                        None => AttrValueType::Nil,
+                    },
                 ])
             })
             .collect(),
