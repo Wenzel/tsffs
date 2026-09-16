@@ -1051,13 +1051,32 @@ impl Tsffs {
             self.symbolic_coverage_directory.display()
         );
 
-        self.coverage.to_html(&self.symbolic_coverage_directory)?;
-
-        debug!(
-            self.as_conf_object(),
-            "Symbolic coverage saved to {}",
-            self.symbolic_coverage_directory.display()
-        );
+        // `Records::to_html` seeds its output tree from the records themselves, so
+        // if no source line was ever recorded (e.g. a short run whose covered code
+        // never lands inside a symbolicated module -- has been observed for real
+        // with UEFI/SMM coverage, whose HARNESS_START may fire before every module
+        // is loaded), it never creates a graph node for `output_directory` at all,
+        // and its own root-node lookup fails with `NodeNotFound` on that exact
+        // path. That's an empty-coverage outcome, not a real error, so it's
+        // reported and skipped rather than propagated as one.
+        match self.coverage.to_html(&self.symbolic_coverage_directory) {
+            Ok(()) => {
+                debug!(
+                    self.as_conf_object(),
+                    "Symbolic coverage saved to {}",
+                    self.symbolic_coverage_directory.display()
+                );
+            }
+            Err(lcov2::error::Error::NodeNotFound { ref path })
+                if *path == self.symbolic_coverage_directory =>
+            {
+                debug!(
+                    self.as_conf_object(),
+                    "No symbolic coverage was recorded this run; skipping HTML report generation"
+                );
+            }
+            Err(e) => return Err(e.into()),
+        }
 
         Ok(())
     }
