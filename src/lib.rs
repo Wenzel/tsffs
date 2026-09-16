@@ -470,6 +470,13 @@ pub(crate) struct Tsffs {
     /// `symbolic_coverage`, TSFFS collects source coverage for UEFI/SMM modules at
     /// `HARNESS_START` by querying `uefi_tracker_object`'s loaded module list and
     /// resolving each module's DWARF debug info under `uefi_debug_info_directory`.
+    /// `debuginfo_source_directory` must also point at the real local source tree
+    /// (e.g. the EDK2 checkout) for any source *lines* to be resolved -- symbols
+    /// resolve independently of it, but every one of them will have zero lines
+    /// (and thus never contribute to the coverage report) without it, since DWARF
+    /// line entries are resolved against `debuginfo_source_directory`, not
+    /// `uefi_debug_info_directory` (which only locates each module's own `.debug`
+    /// file, not its original source).
     pub uefi: bool,
     #[class(attribute(optional, default = String::new()))]
     /// The Simics object path of the UEFI/SMM module tracker to query for the loaded
