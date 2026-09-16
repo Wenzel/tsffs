@@ -121,14 +121,23 @@
 //! that scenario is not disproven for all cases, just this one -- see
 //! [`UefiOsInfo::resolve`]'s doc comment.
 
-use std::path::{Path, PathBuf};
+use std::{
+    fs::read,
+    path::{Path, PathBuf},
+};
 
 use anyhow::{anyhow, bail, Result};
-use simics::AttrValueType;
+use intervaltree::Element;
+use object::File as ObjectFile;
+use simics::{free_attribute, get_object, run_command, AttrValueType};
 use tracing::{debug, warn};
 use walkdir::WalkDir;
 
-use crate::util::path_suffix_index::PathSuffixIndex;
+use crate::{
+    dwarf::{DebugInfoModule, DwarfModule, SymbolInfo},
+    source_cov::SourceCache,
+    util::path_suffix_index::PathSuffixIndex,
+};
 
 /// Placeholder name used for a module whose row has no path at all (a real
 /// "unknown"/unresolved module -- see the module doc comment's "Confirmed shape"
@@ -409,4 +418,93 @@ fn find_by_stem(root: &Path, stem: &str) -> Result<Vec<PathBuf>> {
         .filter(|entry| entry.path().file_stem().and_then(|s| s.to_str()) == Some(stem))
         .map(|entry| entry.path().to_path_buf())
         .collect())
+}
+
+/// Query `tracker_object`'s `->maps` attribute (see the module doc comment for the
+/// confirmed row shape), resolve each discovered module's local debug info against
+/// `build_root`, and load each resolved module's DWARF debug info into interval-tree
+/// elements -- the milestone-3 glue between this module's discovery (UCOV-M2) and
+/// `crate::dwarf::DwarfModule` (UCOV-M1), previously left explicitly out of scope by
+/// both (see this module's and `crate::dwarf`'s doc comments).
+///
+/// UEFI/SMM has no CR3-equivalent per-process address-space switch to key a refresh
+/// off (unlike `crate::os::windows::WindowsOsInfo::collect`, re-run on every CR3
+/// write): all tracked modules are loaded by the time `HARNESS_START` fires (DXE
+/// dispatch completes before the harness/boot-menu stage), and TSFFS repeatedly
+/// restores one snapshot afterward rather than switching address spaces. So this is
+/// meant to be called exactly once, at `HARNESS_START`, not on a recurring trigger.
+pub fn collect_symbols<P>(
+    tracker_object: &str,
+    build_root: P,
+    source_cache: &SourceCache,
+) -> Result<Vec<Element<u64, SymbolInfo>>>
+where
+    P: AsRef<Path>,
+{
+    let maps = run_command(format!("{tracker_object}->maps"))?;
+    let value = AttrValueType::from(maps);
+    free_attribute(maps)?;
+
+    let rows = parse_module_list(&value)?;
+    let resolved = UefiOsInfo::resolve(&rows, build_root)?;
+
+    let mut elements = Vec::new();
+
+    for (name, base, local_path) in &resolved.modules {
+        // EDK2 GCC5 builds place a module's stripped `.efi` PE image and its
+        // unstripped ELF+DWARF `.debug` sidecar side by side in the same build
+        // output directory (see `crate::dwarf`'s module doc comment). `local_path`
+        // here is the local mirror of the module's *embedded* (`.efi`) path
+        // resolved by `UefiOsInfo::resolve` (confirmed by
+        // `tests/uefi_module_discovery_fixture.rs`, which resolves against a
+        // locally-mirrored `.efi` file, not a `.debug` one), so the sidecar this
+        // milestone actually needs is simply that path with its extension swapped.
+        let debug_path = local_path.with_extension("debug");
+
+        let bytes = match read(&debug_path) {
+            Ok(bytes) => bytes,
+            Err(e) => {
+                if let Ok(o) = get_object("tsffs") {
+                    simics::warn!(
+                        o,
+                        "No DWARF debug info for UEFI module {name:?} (expected \
+                         {debug_path:?}, resolved from embedded path via \
+                         {local_path:?}): {e}"
+                    );
+                }
+                continue;
+            }
+        };
+
+        let object_file = match ObjectFile::parse(bytes.as_slice()) {
+            Ok(object_file) => object_file,
+            Err(e) => {
+                if let Ok(o) = get_object("tsffs") {
+                    simics::warn!(
+                        o,
+                        "Failed to parse DWARF debug info for UEFI module {name:?} \
+                         at {debug_path:?}: {e}"
+                    );
+                }
+                continue;
+            }
+        };
+
+        let mut module = DwarfModule::new(name.clone(), *base, object_file);
+
+        match module.intervals(source_cache) {
+            Ok(module_elements) => elements.extend(module_elements),
+            Err(e) => {
+                if let Ok(o) = get_object("tsffs") {
+                    simics::warn!(
+                        o,
+                        "Failed to resolve source coverage intervals for UEFI \
+                         module {name:?} at {debug_path:?}: {e}"
+                    );
+                }
+            }
+        }
+    }
+
+    Ok(elements)
 }
