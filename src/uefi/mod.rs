@@ -329,8 +329,19 @@ impl UefiOsInfo {
         let mut resolved = Vec::with_capacity(modules.len());
 
         for (name, base, _size, embedded_path) in modules {
-            let local_path = resolve_one(&index, build_root, name, embedded_path)?;
-            resolved.push((name.clone(), *base, local_path));
+            // Skip (with a warning), rather than fail the entire batch over,
+            // any single module that can't be resolved. Confirmed live
+            // (a real boot): a real 67-module tracker_obj->maps
+            // capture always has at least one genuinely pathless "<unknown>"
+            // module (see resolve_one's doc comment) -- letting that one
+            // module's error abort the whole call would discard source
+            // coverage for the other 66 real, resolvable modules too.
+            match resolve_one(&index, build_root, name, embedded_path) {
+                Ok(local_path) => resolved.push((name.clone(), *base, local_path)),
+                Err(e) => {
+                    warn!("skipping unresolvable module {name:?}: {e}");
+                }
+            }
         }
 
         Ok(Self { modules: resolved })
