@@ -471,6 +471,14 @@ where
     free_attribute(maps)?;
 
     let rows = parse_module_list(&value)?;
+    if let Ok(o) = get_object("tsffs") {
+        simics::info!(
+            o,
+            "TSFFS_DIAG: raw AttrValueType::List has {} top-level entries; parsed {} real module rows",
+            if let AttrValueType::List(l) = &value { l.len() } else { 0 },
+            rows.len()
+        );
+    }
     let resolved = UefiOsInfo::resolve(&rows, build_root)?;
 
     let mut elements = Vec::new();
