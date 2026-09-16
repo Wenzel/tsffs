@@ -7,27 +7,34 @@
 //!
 //! Unlike Windows (`crate::os::windows`), Simics has no native C interface for
 //! UEFI module discovery -- there is no `osa_target_info` (checked directly
-//! against the Simics 6/7 headers). The only mechanism confirmed to work is the
-//! `uefi_fw_tracker` component's `list-modules` CLI command, invoked from Rust via
+//! against the Simics 6/7 headers). The confirmed-real mechanism, found via a
+//! live investigation on vmsifter (real Simics 6.0.189 session, a real
+//! checkpoint past DXE dispatch, 68 real loaded UEFI modules), is the
+//! `uefi_fw_tracker` component's underlying C object's `maps` attribute, reached
+//! from Rust via Simics's CLI arrow-attribute syntax and the exact same FFI
+//! entry point TSFFS already uses elsewhere in this module's design:
 //! `simics::api::simulator::script::run_command(String) -> Result<AttrValue>`
-//! (e.g. `run_command("$system.soft.tracker.list-modules max = 1000")`, where the
-//! `$system.soft.tracker` object path is board-specific and must be supplied by
-//! the caller, not hardcoded -- confirmed live to be `qsp.software.tracker` on the
-//! `examples/tutorials/edk2-simics-platform` tutorial QSP/X58 board, see below).
-//! Calling `run_command` for real, and everything downstream of it (wiring into
-//! `crate::haps`/`HARNESS_START`, a `self.uefi` attribute on `Tsffs`, touching the
-//! OS enum), is explicitly out of scope for this milestone -- see the UCOV-M2
-//! spec milestone-scope step 3.
+//! (e.g. `run_command("qsp.software.tracker.tracker_obj->maps")`, where the
+//! `qsp.software.tracker` object path is board-specific and must be supplied by
+//! the caller, not hardcoded). This supersedes an earlier design that queried the
+//! tracker's `list-modules` CLI command instead: `list-modules` itself calls
+//! `basename()` on the underlying data before returning it, so it only ever
+//! yields a bare filename, never a full path -- `tracker_obj->maps` is the same
+//! underlying data with the full path intact. Calling `run_command` for real,
+//! and everything downstream of it (wiring into `crate::haps`/`HARNESS_START`, a
+//! `self.uefi` attribute on `Tsffs`, touching the OS enum), is explicitly out of
+//! scope for this milestone -- see the UCOV-M2 spec's milestone-scope step 3.
 //!
 //! This module implements only the two pieces of that spec that are testable
 //! completely offline, with no live Simics session and no real BIOS/UEFI image:
 //!
 //! 1. [`parse_module_list`]: parse the `AttrValue`/`AttrValueType` shape
-//!    `list-modules` returns into `(name, base, size, embedded_path)` tuples.
+//!    `tracker_obj->maps` returns into `(name, base, size, embedded_path)`
+//!    tuples.
 //! 2. [`UefiOsInfo::resolve`]: given those tuples and a local build-root
-//!    directory, resolve each module real local debug-info path.
+//!    directory, resolve each module's real local debug-info path.
 //!
-//! # Why `AttrValueType`, not `AttrValue`, as the parser input type
+//! # Why `AttrValueType`, not `AttrValue`, as the parser's input type
 //!
 //! `simics::AttrValue` is a `#[repr(C)]` wrapper around the C `attr_value_t`
 //! union (see `simics::api::base::attr_value`). Reading a real, already-populated
@@ -39,109 +46,95 @@
 //! fixture would need) allocates through `SIM_alloc_attr_list`/`SIM_alloc_attr_dict`
 //! -- real FFI entry points into `libsimics-common.dll`. Exactly like the
 //! `get_object("tsffs")` call removed from `SourceCache::new` (see
-//! `src/source_cov/mod.rs` and `tests/dwarf_fixture.rs` module doc), calling any
+//! `src/source_cov/mod.rs` and `tests/dwarf_fixture.rs`'s module doc), calling any
 //! `SIM_*` entry point with no live Simics session hard-aborts the process, not
 //! just returns `Err`. `AttrValueType` (the plain Rust tagged-union enum
 //! `Invalid | Nil | Unsigned(u64) | Signed(i64) | Bool(bool) | String(String) |
 //! Float(..) | Object(*mut ConfObject) | Data(Box<[u8]>) | List(Vec<Self>) |
 //! Dict(BTreeMap<Self, Self>)`) has no such constructors -- its variants are built
-//! with plain Rust syntax, no FFI at all -- so it is what this module parser
+//! with plain Rust syntax, no FFI at all -- so it is what this module's parser
 //! takes, and what the offline tests construct fixtures as. At a real call site,
 //! converting the real `AttrValue` returned by `run_command` into `AttrValueType`
 //! via `.into()` (`impl From<AttrValue> for AttrValueType`) is the safe, pure-read
 //! conversion described above; this module never needs to go the other direction.
 //!
-//! # Confirmed shape of `list-modules` return value
+//! # Confirmed shape of `tracker_obj->maps`' return value
 //!
-//! This shape was originally an explicit, documented *assumption* (there was no
-//! live Simics session available to check it against), but it has since been
-//! **confirmed against a real, live Simics session**, and turned out to be wrong
-//! in every particular. The confirmation:
-//!
-//! - On 2026-09-16, on the `vmsifter` host, a real QSP/X58 board was booted to a
-//!   checkpoint (`~/tsffs-bmc-bios-poc/bios-x58i/project/checkpoint.ckpt`, itself
-//!   produced from the same `BoardX58Ich10`/`qsp-uefi-custom` setup this crate own
-//!   `examples/tutorials/edk2-simics-platform` tutorial uses) with the
-//!   `uefi_fw_tracker` inserted and re-enabled (`qsp.software.enable-tracker`)
-//!   after loading the checkpoint. The real object path is `qsp.software.tracker`
-//!   (not the generic `$system.soft.tracker` placeholder above).
-//! - `simics.SIM_run_command("qsp.software.tracker.list-modules max = 1000")` --
-//!   the exact Python-level equivalent of this crate own
-//!   `run_command(String) -> Result<AttrValue>` -- was called directly, and its
-//!   real Python `type()`/`repr()` captured (not the pretty-printed CLI table).
-//!   It returned a plain Python `list` of 78 real modules, each itself a plain
-//!   Python `list` of 5 elements, e.g.
-//!   `['DxeCore.efi', 3744034816, 189184, '', '']`.
-//! - This was cross-checked against the `uefi_fw_tracker` component own installed
-//!   Python source (`simmod/uefi_fw_tracker/module_load.py` `get_mappings`/
-//!   `list_modules`/`mappings_table_properties`), identical across every
-//!   installed Simics-Base version checked (6.0.189, 7.74.0, 7.100.0, 7.106.0):
-//!   `list-modules` is a generic Simics *table* command
-//!   (`table.new_table_command`), and its programmatic return value
-//!   (`cli.command_return(value=out_data, ...)`) is `out_data`, a plain list of
-//!   `[Module, "Loaded Address", "Size", "Adjusted Address", "Adjusted Size"]`
-//!   rows built as `[basename(m['image']), m['loaded_address'], m['loaded_size'],
-//!   ...]` -- confirming both the shape and the *reason* for it (it is this
-//!   Simics version generic table-command return convention, not anything
-//!   UEFI-specific).
-//!
-//! The confirmed real shape, converted from that live Python `repr()` into
-//! `AttrValueType` terms:
+//! Unlike the superseded `list-modules`-based design (which had to *assume* a
+//! shape, since it was never actually queried live), this shape is a confirmed
+//! fact, captured from a real live vmsifter tracker dump reached from Rust via
+//! `run_command`, using the exact same FFI path this module documents above:
 //!
 //! - The top-level value is a `List` of rows.
-//! - Each row is itself a positional `List` (**not** a `Dict` keyed by column
-//!   name, as originally assumed), with at least 3 elements:
-//!   - `[0]` ("Module") -> `String`: the module bare basename only (e.g.
-//!     `DxeCore.efi`), or the literal string `"<unknown>"` if the tracker has no
-//!     image name for that mapping (both observed live) -- **not** the full
-//!     embedded build-machine path originally assumed. `list-modules` never
-//!     exposes that path at all; only the tracker own `params` attribute does
-//!     (populated from a locally-loaded `.map` file via `detect-parameters`/
-//!     `load-parameters`), which is not applicable here since the whole point of
-//!     runtime module discovery is to work without already having that file.
-//!   - `[1]` ("Loaded Address") -> an integer (`Unsigned` or `Signed`; the real
-//!     capture addresses, e.g. `3744034816`, cross the FFI boundary as `Signed`
-//!     for the ranges observed).
-//!   - `[2]` ("Size") -> an integer, same representation as `[1]`.
-//!   - `[3]`/`[4]` ("Adjusted Address"/"Adjusted Size") -> an integer when the
-//!     tracker has separately loaded symbol info at a different address,
-//!     otherwise the literal empty `String("")` -- true for every module in the
-//!     real capture. This module has no use for either column and does not parse
-//!     them; [`parse_module_row`] only requires at least 3 columns to be present.
-//! - A **real observed duplicate-name case** confirms the consequence of the
-//!   above: `BootScriptExecutorDxe.efi` appeared twice in the live capture, at
-//!   two different addresses, with **no other distinguishing information**.
-//!   Because `list-modules` never supplies a full path, [`parse_module_row`]
-//!   `embedded_path` output for every module is just its bare name (`[0]`)
-//!   wrapped in a `PathBuf` -- so [`UefiOsInfo::resolve`] path-suffix
-//!   disambiguation phase can never do better than its own bare-stem-match
-//!   fallback for real `list-modules`-sourced input. For any real duplicate-name
-//!   module, that fallback "fail open" behavior (log a warning, take the first
-//!   sorted local candidate) is therefore the **expected**, common outcome, not
-//!   a rare edge case -- see [`UefiOsInfo::resolve`] doc comment.
-//! - This module own output "name" (in the `(name, base, size, embedded_path)`
-//!   tuple) is read directly from row `[0]` -- unlike the original assumption,
-//!   there is no full path to extract a bare filename from with
-//!   [`Path::file_name`]; row `[0]` already *is* the bare filename.
+//! - Each row is itself a positional `List` of exactly 7 elements (**not** a dict
+//!   keyed by column name, unlike the superseded design):
+//!
+//!   ```text
+//!   [loaded_address, loaded_size, <bool>, adjusted_address, adjusted_size, <bool>, full_path_string]
+//!   ```
+//!
+//!   A real captured example row:
+//!
+//!   ```text
+//!   [3744034816, 189184, True, 3744034816, 189184, True,
+//!    '/home/mtarral/tsffs-bmc-bios-poc/bios-x58i/project/workspace/Build/SimicsOpenBoardPkg/BoardX58Ich10/DEBUG_GCC/X64/MdeModulePkg/Core/Dxe/DxeMain/DEBUG/DxeCore.efi']
+//!   ```
+//!
+//!   This module reads only 3 of the 7 elements:
+//!   - index 0 (`loaded_address`) -> `Unsigned`/`Signed`: the module's loaded/base
+//!     address. (`index 3`, `adjusted_address`, is a distinct post-relocation
+//!     address also present in the real data, but out of scope for this
+//!     milestone -- nothing downstream of this module currently consumes it.)
+//!   - index 1 (`loaded_size`) -> `Unsigned`/`Signed`: the module's size in bytes.
+//!   - index 6 (`full_path_string`) -> `String`, **or absent/empty**: the
+//!     module's full embedded build-machine path. Some rows genuinely have no
+//!     path at all -- real "unknown"/unresolved modules that the tracker could
+//!     not identify (mirroring `module_load.py`'s own upstream guard for
+//!     `m['image'] is None`) -- represented here as an empty string. Unlike the
+//!     superseded design, there is no separate "name" field at all: with this
+//!     row shape, a module's short display name must be *derived* from the full
+//!     path via [`Path::file_name`] when a path is present, e.g. `DxeCore.efi`
+//!     from the example above. See [`parse_module_row`] for how a missing/empty
+//!     path is named instead (`<unknown>`).
+//!   - indices 2, 4, 5 (the two booleans and `adjusted_size`) are not read by
+//!     this module; they are out of scope for this milestone.
+//!
+//! A real, observed duplicate-name case -- two loaded instances of
+//! `BootScriptExecutorDxe.efi`, at two different addresses, seen both via
+//! `list-modules` and via `tracker_obj->maps` -- was re-examined under this
+//! richer source and turned out to have the **identical** full path for both
+//! instances (the same build loaded twice, not two different binaries). So for
+//! that specific real case, path-suffix disambiguation is unnecessary -- any
+//! single matching local file is correct for both addresses. This does *not*
+//! prove disambiguation is unnecessary in general: two genuinely different
+//! builds sharing a basename (e.g. two different EDK2 package subdirectories)
+//! remains a real possibility this module still needs to handle correctly, since
+//! that scenario is not disproven for all cases, just this one -- see
+//! [`UefiOsInfo::resolve`]'s doc comment.
 
 use std::path::{Path, PathBuf};
 
-use anyhow::{bail, Result};
+use anyhow::{anyhow, bail, Result};
 use simics::AttrValueType;
 use tracing::{debug, warn};
 use walkdir::WalkDir;
 
 use crate::util::path_suffix_index::PathSuffixIndex;
 
-/// Parse the `AttrValueType` shape `list-modules` returns (see the module doc
-/// comment for the confirmed real shape) into `(name, base, size, embedded_path)`
-/// tuples, where `name` is the bare filename `list-modules` itself returns (there
-/// is no full path to extract it from), and `embedded_path` is that same bare
-/// name wrapped in a `PathBuf` (see the module doc comment for why).
+/// Placeholder name used for a module whose row has no path at all (a real
+/// "unknown"/unresolved module -- see the module doc comment's "Confirmed shape"
+/// section). Matches the placeholder `list-modules` itself used for such rows in
+/// the real capture that motivated this design.
+pub const UNKNOWN_MODULE_NAME: &str = "<unknown>";
+
+/// Parse the `AttrValueType` shape `tracker_obj->maps` returns (see the module
+/// doc comment for the confirmed shape) into `(name, base, size, embedded_path)`
+/// tuples, where `name` is the bare filename extracted from `embedded_path`, or
+/// [`UNKNOWN_MODULE_NAME`] when a row has no path.
 pub fn parse_module_list(value: &AttrValueType) -> Result<Vec<(String, u64, u64, PathBuf)>> {
     let AttrValueType::List(rows) = value else {
         bail!(
-            "expected list-modules result to be an AttrValueType::List, got {:?}",
+            "expected tracker_obj->maps result to be an AttrValueType::List, got {:?}",
             value
         );
     };
@@ -149,76 +142,96 @@ pub fn parse_module_list(value: &AttrValueType) -> Result<Vec<(String, u64, u64,
     rows.iter().map(parse_module_row).collect()
 }
 
-/// Parse a single row of the confirmed real `list-modules` shape: a positional
-/// `List` of at least 3 columns, `[Module, Loaded Address, Size, ..]` -- see the
-/// module doc comment. Any columns beyond the first 3 (the real shape has 5,
-/// "Adjusted Address"/"Adjusted Size") are ignored; this milestone has no use for
-/// them, and requiring only "at least 3" rather than exactly 5 keeps this
-/// tolerant of Simics versions/trackers that might add or drop trailing columns.
+/// Parse a single row of the confirmed `tracker_obj->maps` shape:
+/// `[loaded_address, loaded_size, <bool>, adjusted_address, adjusted_size,
+/// <bool>, full_path_string]`. Only indices 0 (`base`), 1 (`size`), and 6
+/// (`embedded_path`) are read; see the module doc comment for why the others are
+/// out of scope.
 fn parse_module_row(row: &AttrValueType) -> Result<(String, u64, u64, PathBuf)> {
-    let AttrValueType::List(columns) = row else {
+    let AttrValueType::List(elements) = row else {
         bail!(
-            "expected each list-modules row to be an AttrValueType::List (positional \
-             columns, not a Dict -- see the module doc comment), got {:?}",
+            "expected each tracker_obj->maps row to be an AttrValueType::List, got {:?}",
             row
         );
     };
 
-    if columns.len() < 3 {
+    let Ok([loaded_address, loaded_size, _, _adjusted_address, _adjusted_size, _, full_path]) =
+        <[AttrValueType; 7]>::try_from(elements.clone())
+    else {
         bail!(
-            "expected each list-modules row to have at least 3 columns (Module, Loaded \
-             Address, Size), got {} column(s): {:?}",
-            columns.len(),
+            "expected each tracker_obj->maps row to have exactly 7 elements, got {}: {:?}",
+            elements.len(),
             row
         );
-    }
+    };
 
-    let name = column_string(&columns[0], "Module")?;
-    let base = column_unsigned(&columns[1], "Loaded Address")?;
-    let size = column_unsigned(&columns[2], "Size")?;
+    let base = list_get_unsigned(&loaded_address, 0)?;
+    let size = list_get_unsigned(&loaded_size, 1)?;
+    let embedded_path_str = list_get_string(&full_path, 6)?;
 
-    // `list-modules` never returns a full embedded build-machine path (see the
-    // module doc comment) -- this bare basename, already extracted by the
-    // tracker itself, is all there is.
-    let embedded_path = PathBuf::from(&name);
+    // A row with a genuinely unresolved module is represented as an empty (or
+    // absent -- but this variant of `AttrValueType` can only be empty, not
+    // absent) path string -- see the module doc comment. Treat that as "no
+    // path" and fall back to a fixed placeholder name rather than deriving an
+    // empty/panic-inducing name from it.
+    let (name, embedded_path) = if embedded_path_str.is_empty() {
+        (UNKNOWN_MODULE_NAME.to_string(), PathBuf::new())
+    } else {
+        let embedded_path = PathBuf::from(&embedded_path_str);
+        let name = embedded_path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .map(str::to_string)
+            .ok_or_else(|| {
+                anyhow!(
+                    "embedded path {:?} in tracker_obj->maps row has no file name component",
+                    embedded_path
+                )
+            })?;
+        (name, embedded_path)
+    };
 
     Ok((name, base, size, embedded_path))
 }
 
-fn column_string(value: &AttrValueType, column: &str) -> Result<String> {
-    match value {
-        AttrValueType::String(s) => Ok(s.clone()),
-        other => bail!(
-            "expected list-modules column {:?} to be a String, got {:?}",
-            column,
-            other
-        ),
-    }
-}
-
-fn column_unsigned(value: &AttrValueType, column: &str) -> Result<u64> {
-    match value {
+/// Read a positional `tracker_obj->maps` row element expected to be an unsigned
+/// (or non-negative signed) integer, e.g. `loaded_address`/`loaded_size`.
+/// `index` is only used to produce a helpful error message.
+fn list_get_unsigned(element: &AttrValueType, index: usize) -> Result<u64> {
+    match element {
         AttrValueType::Unsigned(u) => Ok(*u),
         AttrValueType::Signed(s) if *s >= 0 => Ok(*s as u64),
         other => bail!(
-            "expected list-modules column {:?} to be an unsigned integer, got {:?}",
-            column,
+            "expected tracker_obj->maps row element {index} to be an unsigned integer, got {:?}",
             other
         ),
     }
 }
 
-/// UEFI/SMM module debug-info info, resolved from a `list-modules` dump plus a
-/// local build-root directory.
+/// Read a positional `tracker_obj->maps` row element expected to be a string,
+/// i.e. `full_path_string`. `index` is only used to produce a helpful error
+/// message.
+fn list_get_string(element: &AttrValueType, index: usize) -> Result<String> {
+    match element {
+        AttrValueType::String(s) => Ok(s.clone()),
+        other => bail!(
+            "expected tracker_obj->maps row element {index} to be a String, got {:?}",
+            other
+        ),
+    }
+}
+
+/// UEFI/SMM module debug-info info, resolved from a `tracker_obj->maps` dump plus
+/// a local build-root directory.
 ///
 /// Unlike `crate::os::windows::WindowsOsInfo`, which keys most of its state by
 /// CPU index (`HashMap<i32, ...>`) because Windows tracks per-CPU current
-/// process/module state, UEFI/SMM has no such per-CPU context -- it is a single
+/// process/module state, UEFI/SMM has no such per-CPU context -- it's a single
 /// flat address space/module list -- so this holds a flat `Vec` instead.
 #[derive(Debug, Clone, Default)]
 pub struct UefiOsInfo {
     /// Resolved modules: `(name, base, resolved_local_debug_path)`. Feeding this
-    /// into the DWARF milestone `DwarfModule::new(name, base, object)` (which
+    /// into the DWARF milestone's `DwarfModule::new(name, base, object)` (which
     /// needs the `object::File` parsed from the path at `resolved_local_debug_path`)
     /// is explicitly out of scope for this milestone.
     pub modules: Vec<(String, u64, PathBuf)>,
@@ -228,28 +241,39 @@ impl UefiOsInfo {
     /// Resolve local debug-info paths for a parsed module list against a local
     /// build-root directory.
     ///
+    /// Under the superseded `list-modules`-based design, an embedded path was
+    /// assumed to be a rare bonus (`list-modules` itself only ever exposed a
+    /// bare basename, since it calls `basename()` internally), so path-suffix
+    /// matching was a secondary "if we ever get a path" capability and
+    /// bare-stem search was the primary path. `tracker_obj->maps` inverts that:
+    /// a full embedded path is the *common* case (every genuinely-identified
+    /// module has one; see the module doc comment), so path-suffix matching is
+    /// now the primary resolution path.
+    ///
     /// For each module:
-    /// 1. Try matching the module embedded path against a
-    ///    [`PathSuffixIndex`] built over `build_root`, longest suffix first. This
-    ///    disambiguates same-named modules whose embedded paths differ in a
-    ///    parent directory that also exists locally (e.g. two different EDK2
-    ///    package subdirectories) -- **when the caller actually has such an
-    ///    embedded path to give it**. [`parse_module_list`] itself never can
-    ///    (see its module doc comment: real `list-modules` output only ever
-    ///    supplies a bare basename, confirmed live), so for input sourced from
-    ///    it this phase degenerates to exactly the bare-stem fallback below; it
-    ///    remains here as a general capability of this function for any other
-    ///    caller/future data source that might supply a real embedded path.
-    /// 2. If that finds nothing, fall back to a bare-filename-stem search
-    ///    (`rglob`-equivalent walk) under `build_root`.
-    /// 3. If, after both, more than one candidate remains ambiguous, log a
+    /// 1. If the module has no embedded path at all (a genuinely pathless row
+    ///    -- a real "unknown"/unresolved module, not merely a basename-only
+    ///    row), fail that module explicitly rather than guessing -- see
+    ///    [`resolve_one`].
+    /// 2. Otherwise, try matching the module's embedded path against a
+    ///    [`PathSuffixIndex`] built over `build_root`, longest suffix first.
+    ///    This disambiguates same-named modules whose embedded paths differ in
+    ///    a parent directory that also exists locally (e.g. two different EDK2
+    ///    package subdirectories) -- the primary resolution path, and expected
+    ///    to resolve the overwhelming majority of real modules outright, since
+    ///    they carry a full embedded path.
+    /// 3. If that finds nothing (e.g. the embedded path's parent directories
+    ///    don't exist locally under any matching name), fall back to a
+    ///    bare-filename-stem search (`rglob`-equivalent walk) under
+    ///    `build_root`.
+    /// 4. If, after both, more than one candidate remains ambiguous, log a
     ///    warning and take the first (sorted, for determinism) candidate --
-    ///    "fail open", the spec own explicit decision, rather than erroring out
-    ///    or dropping the module. For any real duplicate-name module sourced from
-    ///    live `list-modules` output, this is the **expected**, common outcome
-    ///    (confirmed live: e.g. `BootScriptExecutorDxe.efi` appeared twice with
-    ///    no distinguishing information beyond base address), not a rare edge
-    ///    case.
+    ///    "fail open", the spec's own explicit decision, rather than erroring out
+    ///    or dropping the module. In practice this fires rarely now: the one
+    ///    real observed duplicate-name case investigated (two
+    ///    `BootScriptExecutorDxe.efi` instances) turned out to share an
+    ///    identical full path (the same build loaded twice), which step 2
+    ///    resolves outright with no ambiguity at all.
     pub fn resolve<P>(modules: &[(String, u64, u64, PathBuf)], build_root: P) -> Result<Self>
     where
         P: AsRef<Path>,
@@ -257,7 +281,7 @@ impl UefiOsInfo {
         let build_root = build_root.as_ref();
         // `PathSuffixIndex::build_from_dir` does not hash file contents (unlike
         // `SourceCache::new`), which is the whole point of factoring it out of
-        // `SourceCache` -- see `src/util/path_suffix_index.rs` module doc.
+        // `SourceCache` -- see `src/util/path_suffix_index.rs`'s module doc.
         let index = PathSuffixIndex::build_from_dir(build_root)?;
 
         let mut resolved = Vec::with_capacity(modules.len());
@@ -271,14 +295,34 @@ impl UefiOsInfo {
     }
 }
 
-/// Resolve a single module local debug-info path. See
-/// [`UefiOsInfo::resolve`] doc comment for the algorithm.
+/// Resolve a single module's local debug-info path. See
+/// [`UefiOsInfo::resolve`]'s doc comment for the algorithm.
 fn resolve_one(
     index: &PathSuffixIndex,
     build_root: &Path,
     name: &str,
     embedded_path: &Path,
 ) -> Result<PathBuf> {
+    if embedded_path.as_os_str().is_empty() {
+        // A genuinely pathless row -- a real "unknown"/unresolved module (see
+        // `parse_module_row`/`UNKNOWN_MODULE_NAME`), not merely a basename-only
+        // row (that case can't arise from `tracker_obj->maps`: every row that
+        // has a path at all has a *full* path, never just a basename). There is
+        // no embedded path to suffix-match against, and no real file name to
+        // bare-stem-search by either -- `name` here is just the
+        // `UNKNOWN_MODULE_NAME` placeholder, not a real file name, so searching
+        // for it would either find nothing or silently match an unrelated local
+        // file that happens to share that placeholder name. Fail this module
+        // explicitly instead.
+        bail!(
+            "module {name:?} has no embedded path (unknown/unresolved module); cannot resolve \
+             local debug info"
+        );
+    }
+
+    // Primary resolution path (see `UefiOsInfo::resolve`'s doc comment for why
+    // this now comes first): match the module's full embedded path against a
+    // `PathSuffixIndex` built over `build_root`, longest suffix first.
     if let Some(local_path) = index.lookup_str_unambiguous(&embedded_path.to_string_lossy()) {
         debug!(
             "resolved module {name:?} via path-suffix match: {embedded_path:?} -> {local_path:?}"
@@ -287,8 +331,10 @@ fn resolve_one(
     }
 
     // Fall back to a bare-filename-stem search, since the suffix index found no
-    // match at all (e.g. the embedded path parent directories do not exist
-    // locally under any name that matches).
+    // match at all (e.g. the embedded path's parent directories don't exist
+    // locally under any name that matches). This is now specifically a
+    // fallback for that case, not the primary path -- see `UefiOsInfo::resolve`'s
+    // doc comment.
     let stem = embedded_path
         .file_stem()
         .and_then(|s| s.to_str())
@@ -314,17 +360,17 @@ fn resolve_one(
         }
         n => {
             // Fail open: log and take the first (sorted) match rather than
-            // erroring out or dropping the module -- this is the spec own
+            // erroring out or dropping the module -- this is the spec's own
             // explicit decision, matching the `warn!`/`debug!` logging style
             // already used for similar disambiguation situations in
-            // `crate::os::windows` (see e.g. `src/os/windows/structs.rs`
+            // `crate::os::windows` (see e.g. `src/os/windows/structs.rs`'s
             // module-lookup logging). Unlike those call sites, this uses the
             // plain `tracing` crate rather than `simics::warn!`/`simics::debug!`:
             // the latter require a live `ConfObject` (e.g.
             // `get_object("tsffs")?`) and call real `SIM_*` FFI entry points,
             // which -- exactly like the bug fixed in `SourceCache::new` -- hard-
             // abort the process with no live Simics session, which is
-            // unconditionally true for this milestone offline scope.
+            // unconditionally true for this milestone's offline scope.
             warn!(
                 "ambiguous local debug info for module {name:?}: {n} candidates matched stem \
                  {stem:?} with no unique path-suffix match (embedded path {embedded_path:?}); \
