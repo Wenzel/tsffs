@@ -514,20 +514,7 @@ where
     free_attribute(maps)?;
 
     let rows = parse_module_list(&value)?;
-    let build_root_display = build_root.as_ref().display().to_string();
     let resolved = UefiOsInfo::resolve(&rows, build_root)?;
-    if let Ok(o) = get_object("tsffs") {
-        simics::info!(
-            o,
-            "TSFFS_DIAG2: parsed {} rows, resolved {} local paths, build_root={}",
-            rows.len(),
-            resolved.modules.len(),
-            build_root_display
-        );
-        if let Some((name, _base, path)) = resolved.modules.first() {
-            simics::info!(o, "TSFFS_DIAG2: first resolved module {name:?} -> {path:?}");
-        }
-    }
 
     let mut elements = Vec::new();
 
@@ -585,10 +572,6 @@ where
                 }
             }
         }
-    }
-
-    if let Ok(o) = get_object("tsffs") {
-        simics::info!(o, "TSFFS_DIAG2: collected {} interval elements", elements.len());
     }
 
     Ok(elements)
