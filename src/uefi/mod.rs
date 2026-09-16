@@ -132,7 +132,7 @@ use std::{
 use anyhow::{anyhow, bail, Result};
 use intervaltree::Element;
 use object::File as ObjectFile;
-use simics::{free_attribute, get_attribute, get_object, AttrValueType};
+use simics::{free_attribute, get_attribute, get_object, AttrValue, AttrValueType};
 use tracing::{debug, warn};
 use walkdir::WalkDir;
 
@@ -467,18 +467,42 @@ where
     // tracker-timing issue.
     let tracker_conf_object = get_object(tracker_object)?;
     let maps = get_attribute(tracker_conf_object, "maps")?;
-    let value = AttrValueType::from(maps);
+
+    // `AttrValueType::from(AttrValue)` (equivalently, plain `.into()`) recurses
+    // into nested lists via `AttrValue::as_list::<AttrValueType>`, which -- despite
+    // the crate's own "Rust vectors cannot be heterogeneous" comment suggesting
+    // otherwise -- requires every element of a list to share the same
+    // `private_kind` before converting any of them, silently returning `None`
+    // (and thus `AttrValueType::Invalid`) for the whole list otherwise. The outer
+    // `maps` list is homogeneous (every row is itself a `List`), so converting
+    // *it* this way works. But each row is `[Unsigned, Unsigned, Bool, Unsigned,
+    // Unsigned, Bool, String]` -- genuinely heterogeneous -- so plain `.into()`
+    // silently turned every real row into `AttrValueType::Invalid`, confirmed
+    // live: a real 67-row `maps` converted this way parsed as 0 module
+    // rows, no errors, no warnings, just quietly wrong. `as_heterogeneous_list`
+    // has no such check, so extract each row as a raw `AttrValue` first (via
+    // `as_list::<AttrValue>`, an identity conversion -- fine, since the *outer*
+    // list is genuinely homogeneous), then convert each row with
+    // `as_heterogeneous_list`, which is exactly what a 7-element heterogeneous
+    // row needs.
+    let raw_rows: Vec<AttrValue> = maps
+        .as_list()
+        .ok_or_else(|| anyhow!("expected tracker_obj->maps to be an AttrValue list"))?;
+
+    let value = AttrValueType::List(
+        raw_rows
+            .iter()
+            .map(|row| {
+                row.as_heterogeneous_list()
+                    .map(AttrValueType::List)
+                    .ok_or_else(|| anyhow!("expected each tracker_obj->maps row to be a list"))
+            })
+            .collect::<Result<Vec<_>>>()?,
+    );
+
     free_attribute(maps)?;
 
     let rows = parse_module_list(&value)?;
-    if let Ok(o) = get_object("tsffs") {
-        simics::info!(
-            o,
-            "TSFFS_DIAG: raw AttrValueType::List has {} top-level entries; parsed {} real module rows",
-            if let AttrValueType::List(l) = &value { l.len() } else { 0 },
-            rows.len()
-        );
-    }
     let resolved = UefiOsInfo::resolve(&rows, build_root)?;
 
     let mut elements = Vec::new();
