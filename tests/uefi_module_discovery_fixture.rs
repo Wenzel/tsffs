@@ -494,6 +494,32 @@ fn resolve_fails_gracefully_not_panics_for_pathless_unknown_module() -> Result<(
     Ok(())
 }
 
+#[test]
+fn skips_invalid_top_level_entries_without_erroring() -> Result<()> {
+    // Confirmed live (a real fuzzing run whose `HARNESS_START`
+    // fired early in DXE dispatch): `tracker_obj->maps` can return a list
+    // containing `AttrValueType::Invalid` entries -- reserved but not-yet-
+    // populated slots -- alongside well-formed 7-element module rows. This must
+    // not error the whole batch; those entries should simply be skipped.
+    let rows = fixture_rows();
+    let mut value = fixture_attr_value(&rows);
+
+    let AttrValueType::List(ref mut top_level) = value else {
+        panic!("fixture_attr_value did not return an AttrValueType::List");
+    };
+    top_level.insert(0, AttrValueType::Invalid);
+    top_level.push(AttrValueType::Invalid);
+
+    let parsed = parse_module_list(&value)?;
+    assert_eq!(
+        parsed.len(),
+        rows.len(),
+        "Invalid top-level entries must be skipped, not counted as modules or cause an error"
+    );
+
+    Ok(())
+}
+
 /// A `tracing_subscriber::fmt::MakeWriter` that captures formatted log output into
 /// a shared in-memory buffer, so tests can assert on it directly instead of only
 /// inferring the warning fired from behavior.

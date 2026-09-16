@@ -149,6 +149,16 @@ pub const UNKNOWN_MODULE_NAME: &str = "<unknown>";
 /// doc comment for the confirmed shape) into `(name, base, size, embedded_path)`
 /// tuples, where `name` is the bare filename extracted from `embedded_path`, or
 /// [`UNKNOWN_MODULE_NAME`] when a row has no path.
+///
+/// Skips any top-level `AttrValueType::Invalid` entry rather than erroring the
+/// whole batch over it. Confirmed live (a real fuzzing run whose
+/// `HARNESS_START` fires early in DXE dispatch, well before all modules are
+/// loaded): `maps` can return a list containing `Invalid` entries -- a reserved
+/// but not-yet-populated slot in the tracker's underlying storage -- alongside
+/// well-formed 7-element rows for the modules actually loaded so far. This is
+/// distinct from a genuinely pathless *module* row (still a well-formed 7-element
+/// list, just with a `Nil` path at index 6 -- see [`parse_module_row`]), so it's
+/// handled separately, before a row is assumed to be a `List` at all.
 pub fn parse_module_list(value: &AttrValueType) -> Result<Vec<(String, u64, u64, PathBuf)>> {
     let AttrValueType::List(rows) = value else {
         bail!(
@@ -157,7 +167,10 @@ pub fn parse_module_list(value: &AttrValueType) -> Result<Vec<(String, u64, u64,
         );
     };
 
-    rows.iter().map(parse_module_row).collect()
+    rows.iter()
+        .filter(|row| !matches!(row, AttrValueType::Invalid))
+        .map(parse_module_row)
+        .collect()
 }
 
 /// Parse a single row of the confirmed `tracker_obj->maps` shape:
