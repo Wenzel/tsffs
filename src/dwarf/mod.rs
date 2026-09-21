@@ -41,8 +41,8 @@ use std::{borrow::Cow, collections::HashMap, path::PathBuf};
 
 use anyhow::{anyhow, Result};
 use gimli::{
-    DebuggingInformationEntry, DwarfSections, EndianSlice, LineProgramHeader, Reader,
-    RunTimeEndian, SectionId, UnitRef,
+    AttributeValue, DebuggingInformationEntry, DwarfSections, EndianSlice, LineProgramHeader,
+    Reader, RunTimeEndian, SectionId, Unit, UnitRef,
 };
 use intervaltree::Element;
 use object::{Object, ObjectSection};
@@ -166,6 +166,7 @@ impl<'data> DwarfModule<'data> {
     fn unit_symbols<R: Reader>(
         &self,
         unit_ref: UnitRef<R>,
+        all_units: &[Unit<R>],
         source_cache: &SourceCache,
     ) -> Result<Vec<SymbolInfo>> {
         let Some(incomplete_line_program) = unit_ref.line_program.clone() else {
@@ -225,14 +226,14 @@ impl<'data> DwarfModule<'data> {
                 continue;
             }
 
-            let Some(name) = entry.attr_value(gimli::DW_AT_name) else {
-                // No direct DW_AT_name (e.g. only reachable via DW_AT_specification /
-                // DW_AT_abstract_origin). Handling that indirection is left for a
-                // follow-up; skip for now.
+            let Some((name, name_unit_ref)) = Self::resolve_name(entry, unit_ref, all_units) else {
+                // No name resolvable via DW_AT_name, DW_AT_abstract_origin, or
+                // DW_AT_specification -- not a concrete named subprogram we can key
+                // symbol info on.
                 continue;
             };
 
-            let name = unit_ref
+            let name = name_unit_ref
                 .attr_string(name)
                 .map_err(|e| anyhow!("Failed to read DWARF subprogram name: {e}"))?
                 .to_string_lossy()
@@ -252,6 +253,58 @@ impl<'data> DwarfModule<'data> {
         }
 
         Ok(symbols)
+    }
+
+    /// Resolve a DIE's effective `DW_AT_name` attribute for stringification, following
+    /// `DW_AT_abstract_origin` (falling back to `DW_AT_specification`) to the referenced
+    /// DIE when `entry` has no direct `DW_AT_name` of its own. Returns the resolved
+    /// `DW_AT_name` attribute value together with the `UnitRef` of the unit that DIE
+    /// actually lives in -- needed to correctly stringify forms such as
+    /// `DW_FORM_strx` (relative to a per-unit string-offsets base); not needed for the
+    /// common `DW_FORM_strp` (absolute `.debug_str` offset) case seen in practice, but
+    /// cheap to keep correct either way.
+    ///
+    /// GCC5/EDK2 universally emits the standard "abstract instance / concrete
+    /// instance" DWARF split for every real function: the concrete DIE (the one with
+    /// `DW_AT_low_pc`/`DW_AT_high_pc`, i.e. `entry` here) has `DW_AT_abstract_origin`
+    /// pointing at a separate DIE that carries the real `DW_AT_name`, instead of a
+    /// direct name on itself. Confirmed against 914 real EDK2 GCC5 `.debug` files,
+    /// that reference is universally `DW_FORM_ref_addr` (a raw `.debug_info`-section
+    /// offset, decoded by gimli as `AttributeValue::DebugInfoRef`), rather than a same-unit
+    /// `AttributeValue::UnitRef` -- GCC emits each "abstract instance" DIE once, in
+    /// whichever compilation unit first defines it, and references it from every other
+    /// unit that inlines/instantiates it, so the referenced DIE is frequently in a
+    /// *different* CU than `entry`. Hence resolving it requires searching
+    /// `all_units` (every unit in this module, pre-parsed by `intervals`), not just
+    /// `unit_ref`'s own unit -- `AttributeValue::UnitRef` is still handled too, in case
+    /// some DIEs reference same-unit offsets instead.
+    fn resolve_name<'u, R: Reader>(
+        entry: &DebuggingInformationEntry<R>,
+        unit_ref: UnitRef<'u, R>,
+        all_units: &'u [Unit<R>],
+    ) -> Option<(AttributeValue<R>, UnitRef<'u, R>)> {
+        if let Some(name) = entry.attr_value(gimli::DW_AT_name) {
+            return Some((name, unit_ref));
+        }
+
+        let origin = entry
+            .attr_value(gimli::DW_AT_abstract_origin)
+            .or_else(|| entry.attr_value(gimli::DW_AT_specification))?;
+
+        match origin {
+            AttributeValue::UnitRef(offset) => {
+                let origin_entry = unit_ref.entry(offset).ok()?;
+                let name = origin_entry.attr_value(gimli::DW_AT_name)?;
+                Some((name, unit_ref))
+            }
+            AttributeValue::DebugInfoRef(offset) => all_units.iter().find_map(|candidate| {
+                let local_offset = offset.to_unit_offset(&candidate.header)?;
+                let origin_entry = candidate.entry(local_offset).ok()?;
+                let name = origin_entry.attr_value(gimli::DW_AT_name)?;
+                Some((name, candidate.unit_ref(unit_ref.dwarf)))
+            }),
+            _ => None,
+        }
     }
 
     /// Compute the `[low, high)` link-time address range of a DIE from its
@@ -334,20 +387,31 @@ impl<'data> DebugInfoModule for DwarfModule<'data> {
             .map_err(|e| anyhow!("Failed to load DWARF sections: {e}"))?;
         let dwarf = dwarf_sections.borrow(|section| EndianSlice::new(section, endian));
 
-        let mut symbols = Vec::new();
-
+        // Pre-parse every compilation unit up front, rather than one at a time as
+        // they're walked below, so that DW_AT_abstract_origin/DW_AT_specification
+        // references that cross compilation-unit boundaries (see `resolve_name`) can
+        // be resolved against *any* unit, not just whichever one is currently being
+        // walked.
+        let mut all_units = Vec::new();
         let mut unit_headers = dwarf.units();
 
         while let Some(header) = unit_headers
             .next()
             .map_err(|e| anyhow!("Failed to read next DWARF unit header: {e}"))?
         {
-            let unit = dwarf
-                .unit(header)
-                .map_err(|e| anyhow!("Failed to parse DWARF unit: {e}"))?;
+            all_units.push(
+                dwarf
+                    .unit(header)
+                    .map_err(|e| anyhow!("Failed to parse DWARF unit: {e}"))?,
+            );
+        }
+
+        let mut symbols = Vec::new();
+
+        for unit in &all_units {
             let unit_ref = unit.unit_ref(&dwarf);
 
-            symbols.extend(self.unit_symbols(unit_ref, source_cache)?);
+            symbols.extend(self.unit_symbols(unit_ref, &all_units, source_cache)?);
         }
 
         Ok(symbols
