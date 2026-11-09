@@ -32,7 +32,7 @@ use crate::interfaces::{config::config, fuzz::fuzz};
 use crate::state::{SnapshotRestorePolicy, SolutionKind, StopReason};
 #[cfg(simics_version = "6")]
 use crate::util::Utils;
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 use arch::{Architecture, ArchitectureHint, ArchitectureOperations};
 use fuzzer::{messages::FuzzerMessage, ShutdownMessage, Testcase};
 use indoc::indoc;
@@ -47,6 +47,8 @@ use os::windows::WindowsOsInfo;
 use serde::{Deserialize, Serialize};
 use serde_json::to_writer;
 use simics::continue_simulation;
+#[cfg(simics_version = "6")]
+use simics::free_attribute;
 use simics::{
     break_simulation, class, debug, error, get_class, get_interface, get_processor_number, info,
     lookup_file, object_clock, run_alone, run_command, run_python, simics_init, sys::save_flags_t,
@@ -56,8 +58,6 @@ use simics::{
     CoreSimulationStoppedHap, CpuInstrumentationSubscribeInterface, Event, EventClassFlag,
     FromConfObject, HapHandle, Interface,
 };
-#[cfg(simics_version = "6")]
-use simics::free_attribute;
 #[cfg(simics_version = "6")]
 use simics::{
     discard_future, restore_micro_checkpoint, save_micro_checkpoint, MicroCheckpointFlags,
@@ -82,7 +82,7 @@ use std::{
     time::SystemTime,
 };
 use tracer::{
-    tsffs::{on_instruction_after, on_instruction_before},
+    tsffs::{on_cached_instruction, on_instruction_after, on_instruction_before},
     ExecutionTrace,
 };
 use typed_builder::TypedBuilder;
@@ -706,24 +706,71 @@ impl Tsffs {
             cpu_number
         );
 
+        let full_instruction_features = [
+            ("symbolic/source coverage", self.symbolic_coverage),
+            ("all execution traces", self.save_all_execution_traces),
+            (
+                "interesting execution traces",
+                self.save_interesting_execution_traces,
+            ),
+            (
+                "solution execution traces",
+                self.save_solution_execution_traces,
+            ),
+            (
+                "timeout execution traces",
+                self.save_timeout_execution_traces,
+            ),
+        ]
+        .into_iter()
+        .filter_map(|(name, enabled)| enabled.then_some(name))
+        .collect::<Vec<_>>();
+
         if let Entry::Vacant(e) = self.processors.entry(cpu_number) {
-            let architecture = if let Some(hint) = self.architecture_hints.get(&cpu_number) {
+            let mut architecture = if let Some(hint) = self.architecture_hints.get(&cpu_number) {
                 hint.architecture(cpu)?
             } else {
                 Architecture::new(cpu)?
             };
+            let selective = matches!(architecture, Architecture::X86_64(_))
+                && full_instruction_features.is_empty();
+            if selective {
+                if let Architecture::X86_64(arch) = &mut architecture {
+                    arch.enable_cached_instrumentation(self.cmplog)?;
+                }
+            }
             e.insert(architecture);
             let mut cpu_interface: CpuInstrumentationSubscribeInterface = get_interface(cpu)?;
-            cpu_interface.register_instruction_after_cb(
-                null_mut(),
-                Some(on_instruction_after),
-                self as *mut Self as *mut _,
-            )?;
-            cpu_interface.register_instruction_before_cb(
-                null_mut(),
-                Some(on_instruction_before),
-                self as *mut Self as *mut _,
-            )?;
+            if selective {
+                if let Err(error) = cpu_interface.register_cached_instruction_cb(
+                    null_mut(),
+                    Some(on_cached_instruction),
+                    self as *mut Self as *mut _,
+                ) {
+                    self.processors.remove(&cpu_number);
+                    return Err(error).context("Failed to subscribe to x86-64 cached instructions");
+                }
+                info!(
+                    self.as_conf_object(),
+                    "CPU {cpu_number}: selective branch/compare instrumentation enabled"
+                );
+            } else {
+                if !full_instruction_features.is_empty() {
+                    warn!(self.as_conf_object(),
+                        "CPU {cpu_number}: full-instruction instrumentation enabled for {}; callbacks on every instruction may substantially reduce fuzzing throughput",
+                        full_instruction_features.join(", "));
+                }
+                cpu_interface.register_instruction_after_cb(
+                    null_mut(),
+                    Some(on_instruction_after),
+                    self as *mut Self as *mut _,
+                )?;
+                cpu_interface.register_instruction_before_cb(
+                    null_mut(),
+                    Some(on_instruction_before),
+                    self as *mut Self as *mut _,
+                )?;
+            }
         }
 
         if is_start {

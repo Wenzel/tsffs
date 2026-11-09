@@ -11,8 +11,9 @@ use rustc_demangle::try_demangle;
 use serde::{Deserialize, Serialize};
 use simics::{
     api::{
-        get_processor_number, sys::instruction_handle_t, AsConfObject, AttrValue, AttrValueType,
-        ConfObject,
+        get_processor_number,
+        sys::{cached_instruction_handle_t, instruction_handle_t},
+        AsConfObject, AttrValue, AttrValueType, ConfObject,
     },
     get_interface, trace, ProcessorInfoV2Interface,
 };
@@ -22,7 +23,106 @@ use std::{
 };
 use typed_builder::TypedBuilder;
 
-use crate::{arch::ArchitectureOperations, Tsffs};
+use crate::{
+    arch::{Architecture, ArchitectureOperations},
+    Tsffs,
+};
+
+pub(crate) struct DecodedComparison {
+    pub expressions: Vec<CmpExpr>,
+    pub types: Vec<CmpType>,
+}
+
+#[cfg(test)]
+mod cached_feedback_tests {
+    use super::*;
+    use std::ptr::null_mut;
+
+    #[test]
+    fn repeated_branches_preserve_hit_counts_chaining_and_reporting() -> Result<()> {
+        let mut tsffs = Tsffs {
+            coverage_reporting: true,
+            ..Default::default()
+        };
+        tsffs
+            .coverage_map
+            .set(vec![0u8; 16].into())
+            .map_err(|_| anyhow!("Coverage map already set"))?;
+        for _ in 0..257 {
+            tsffs.record_branch(4)?;
+        }
+        let map = tsffs
+            .coverage_map
+            .get()
+            .ok_or_else(|| anyhow!("Missing coverage map"))?
+            .as_slice();
+        assert_eq!(map[4], 1);
+        assert_eq!(map[6], 0);
+        assert_eq!(tsffs.coverage_prev_loc, 2);
+        assert_eq!(tsffs.edges_seen_since_last.get(&4), Some(&4));
+
+        tsffs.coverage_prev_loc = 0;
+        tsffs.record_branch(4)?;
+        assert_eq!(
+            tsffs
+                .coverage_map
+                .get()
+                .ok_or_else(|| anyhow!("Missing coverage map"))?
+                .as_slice()[4],
+            2
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn inactive_comparison_callbacks_do_not_read_cpu_state() -> Result<()> {
+        let comparison = DecodedComparison {
+            expressions: vec![],
+            types: vec![],
+        };
+        for (coverage_enabled, cmplog, cmplog_enabled) in [
+            (false, true, true),
+            (true, false, true),
+            (true, true, false),
+        ] {
+            let mut tsffs = Tsffs {
+                coverage_enabled,
+                cmplog,
+                cmplog_enabled,
+                ..Default::default()
+            };
+            tsffs.trace_cached_comparison(null_mut(), &comparison)?;
+        }
+        Ok(())
+    }
+}
+
+struct CachedComparison {
+    tsffs: *mut Tsffs,
+    decoded: DecodedComparison,
+}
+
+unsafe extern "C" fn free_cached_comparison(
+    _obj: *mut ConfObject,
+    _cpu: *mut ConfObject,
+    data: *mut c_void,
+) {
+    // Simics releases this allocation when it discards the associated cache entry.
+    drop(Box::from_raw(data.cast::<CachedComparison>()));
+}
+
+unsafe extern "C" fn on_cached_comparison(
+    _obj: *mut ConfObject,
+    cpu: *mut ConfObject,
+    _handle: *mut instruction_handle_t,
+    data: *mut c_void,
+) {
+    let data = &*data.cast::<CachedComparison>();
+    let tsffs = &mut *data.tsffs;
+    tsffs
+        .trace_cached_comparison(cpu, &data.decoded)
+        .expect("Failed to trace cached comparison");
+}
 
 #[derive(Clone, Deserialize, Serialize, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) struct ExecutionTraceSymbol {
@@ -260,6 +360,35 @@ impl From<CoverageMode> for AttrValueType {
 }
 
 impl Tsffs {
+    fn record_branch(&mut self, pc: u64) -> Result<()> {
+        if self.coverage_reporting && self.edges_seen.insert(pc) {
+            let coverage_map = self.coverage_map.get_mut().ok_or_else(|| {
+                anyhow!("Coverage map not initialized. This is a bug in the fuzzer or the target")
+            })?;
+            let afl_idx = (pc ^ self.coverage_prev_loc) % coverage_map.as_slice().len() as u64;
+            self.edges_seen_since_last.insert(pc, afl_idx);
+        }
+        self.log_pc(pc)
+    }
+
+    fn trace_cached_comparison(
+        &mut self,
+        cpu: *mut ConfObject,
+        decoded: &DecodedComparison,
+    ) -> Result<()> {
+        if self.coverage_enabled && self.cmplog && self.cmplog_enabled {
+            let number = get_processor_number(cpu)?;
+            if let Some(Architecture::X86_64(arch)) = self.processors.get_mut(&number) {
+                if let Ok(entry) = arch.trace_decoded_cmp(decoded) {
+                    if let Some((pc, types, cmp)) = entry.cmp {
+                        self.log_cmp(pc, types, cmp)?;
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
     fn log_pc(&mut self, pc: u64) -> Result<()> {
         let coverage_map = self.coverage_map.get_mut().ok_or_else(|| {
             anyhow!("Coverage map not initialized. This is a bug in the fuzzer or the target")
@@ -315,6 +444,68 @@ impl Tsffs {
 #[ffi(from_ptr, expect, self_ty = "*mut c_void")]
 impl Tsffs {
     #[ffi(arg(rest), arg(self))]
+    /// Classify an x86-64 instruction and attach only the required execution callbacks.
+    pub fn on_cached_instruction(
+        &mut self,
+        _obj: *mut ConfObject,
+        cpu: *mut ConfObject,
+        cached_handle: *mut cached_instruction_handle_t,
+        handle: *mut instruction_handle_t,
+    ) -> Result<()> {
+        let tsffs = self as *mut Self;
+        let number = get_processor_number(cpu)?;
+        if let Some(Architecture::X86_64(arch)) = self.processors.get_mut(&number) {
+            let Ok(decoded) = arch.decode_cached_instruction(handle) else {
+                return Ok(());
+            };
+            let interface = arch
+                .cached_instruction
+                .as_mut()
+                .ok_or_else(|| anyhow!("Cached instruction interface not initialized"))?;
+            if decoded.branch {
+                interface.register_instruction_after_cb(
+                    cached_handle,
+                    Some(tsffs::on_cached_branch_after),
+                    tsffs.cast(),
+                    None,
+                )?;
+            }
+            if let Some(decoded) = decoded.comparison {
+                let data = Box::into_raw(Box::new(CachedComparison { tsffs, decoded }));
+                if let Err(error) = interface.register_instruction_before_cb(
+                    cached_handle,
+                    Some(on_cached_comparison),
+                    data.cast(),
+                    Some(free_cached_comparison),
+                ) {
+                    unsafe { drop(Box::from_raw(data)) };
+                    return Err(error.into());
+                }
+            }
+        }
+        Ok(())
+    }
+
+    #[ffi(arg(rest), arg(self))]
+    /// Record the destination after an instrumented branch executes, without decoding it.
+    pub fn on_cached_branch_after(
+        &mut self,
+        _obj: *mut ConfObject,
+        cpu: *mut ConfObject,
+        _handle: *mut instruction_handle_t,
+    ) -> Result<()> {
+        if self.coverage_enabled {
+            let number = get_processor_number(cpu)?;
+            if let Some(arch) = self.processors.get_mut(&number) {
+                if let Ok(pc) = arch.processor_info_v2().get_program_counter() {
+                    self.record_branch(pc)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    #[ffi(arg(rest), arg(self))]
     /// Callback after each instruction executed
     ///
     /// # Arguments
@@ -335,15 +526,7 @@ impl Tsffs {
                 match arch.trace_pc(handle) {
                     Ok(r) => {
                         if let Some(pc) = r.edge {
-                            if self.coverage_reporting && self.edges_seen.insert(pc) {
-                                let coverage_map = self.coverage_map.get_mut().ok_or_else(|| {
-                                    anyhow!("Coverage map not initialized. This is a bug in the fuzzer or the target")
-                                })?;
-                                let afl_idx = (pc ^ self.coverage_prev_loc)
-                                    % coverage_map.as_slice().len() as u64;
-                                self.edges_seen_since_last.insert(pc, afl_idx);
-                            }
-                            self.log_pc(pc)?;
+                            self.record_branch(pc)?;
                         }
                     }
                     Err(_) => {
@@ -396,6 +579,7 @@ impl Tsffs {
             && self.symbolic_coverage
             && (self.save_all_execution_traces
                 || self.save_interesting_execution_traces
+                || self.save_timeout_execution_traces
                 || self.save_solution_execution_traces)
         {
             // Get the current instruction address
@@ -498,6 +682,7 @@ impl Tsffs {
         if self.coverage_enabled
             && (self.save_all_execution_traces
                 || self.save_interesting_execution_traces
+                || self.save_timeout_execution_traces
                 || self.save_solution_execution_traces)
         {
             if let Some(arch) = self.processors.get_mut(&processor_number) {
