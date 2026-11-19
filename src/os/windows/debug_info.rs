@@ -535,8 +535,10 @@ impl SymbolInfo {
         }
     }
 
-    /// The offset of `pc` into the symbol, which starts at `base + rva`
+    /// The offset of `pc` into the symbol, which starts at `base + rva`. `pc` must not be below
+    /// the symbol start: it never is for a symbol found by looking `pc` up.
     pub fn offset(&self, pc: u64) -> u64 {
+        debug_assert!(pc >= self.base + self.rva);
         pc - self.base - self.rva
     }
 }
