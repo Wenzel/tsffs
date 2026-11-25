@@ -1,0 +1,33 @@
+diff --git a/MdeModulePkg/Include/Guid/AsanInfo.h b/MdeModulePkg/Include/Guid/AsanInfo.h
+index 2cb032f..6e00e43 100755
+--- a/MdeModulePkg/Include/Guid/AsanInfo.h
++++ b/MdeModulePkg/Include/Guid/AsanInfo.h
+@@ -90,6 +90,14 @@ typedef struct {
+   UINT64       AsanUntrustedSeenIp[8];
+   UINT64       AsanUntrustedSeenAddr[8];
+   UINT32       AsanUntrustedSeenSize[8];
++  //
++  // Where the shared state above lives when the platform keeps it out of the HOB list.
++  // HOB memory is BootServicesData, which SMM cannot read once restricted memory access
++  // (PcdCpuSmmRestrictedMemoryAccess) is on, so an instrumented SMM module reading its
++  // window and untrusted regions through the HOB pointer takes a page fault. A platform
++  // that sets this points it at reserved memory; zero keeps the HOB data as the state.
++  //
++  UINT64       AsanSharedInfo;
+ } ASAN_INFO;
+ 
+ extern EFI_GUID gAsanInfoGuid;
+diff --git a/MdeModulePkg/Library/AsanLib/Asan.c b/MdeModulePkg/Library/AsanLib/Asan.c
+index a7808c7..9fc6e97 100755
+--- a/MdeModulePkg/Library/AsanLib/Asan.c
++++ b/MdeModulePkg/Library/AsanLib/Asan.c
+@@ -2752,6 +2752,9 @@ SetupAsanShadowMemory (
+ 
+   AsanInfoPtr = GET_GUID_HOB_DATA (GuidHob);
+   mAsanInfo   = AsanInfoPtr;
++  if (AsanInfoPtr->AsanSharedInfo != 0) {
++    mAsanInfo = (ASAN_INFO *)(UINTN)AsanInfoPtr->AsanSharedInfo;
++  }
+   asan_inited = (AsanInfoPtr->AsanInited == 0)? FALSE: TRUE;;
+   asan_is_deactivated = (AsanInfoPtr->AsanActivated == 0)? TRUE: FALSE;
+   mAsanShadowMemoryStart = AsanInfoPtr->AsanShadowMemoryStart;

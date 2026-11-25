@@ -1,9 +1,10 @@
 # Copyright (C) 2024 Intel Corporation
 # SPDX-License-Identifier: Apache-2.0
 
-# Replay every seed in %simics%/seeds-step<step> through the SMI handler, each
-# one from the initial snapshot, and log how it ended ("Replayed <seed>: ...").
+# Replay every seed in a directory through the SMI handler, each one from the
+# initial snapshot, and log how it ended ("Replayed <seed>: ...").
 #   ./simics --no-win --batch-mode -e '$step="2"' replay.simics
+# The directory is %simics%/seeds-step<step>, or $seeds when that is set.
 
 load-module tsffs
 init-tsffs
@@ -16,6 +17,8 @@ tsffs.log-level 2
 
 load-target "qsp-x86/qsp-uefi-custom" namespace = qsp machine:software:firmware:bios = ("%simics%/images/step" + $step + ".fd")
 
-@tsffs.iface.fuzz.repro(SIM_lookup_file("%simics%") + "/seeds-step" + simenv.step)
+@import os
+@seeds = getattr(simenv, "seeds", None) or ("seeds-step" + simenv.step)
+@tsffs.iface.fuzz.repro(os.path.join(SIM_lookup_file("%simics%"), seeds))
 run
 quit

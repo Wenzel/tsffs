@@ -21,6 +21,14 @@
 
 #include "tsffs.h"
 
+// Only present when the firmware carries an ASan runtime (AsanLib). Weak, so the
+// harness still links on a build without one.
+VOID
+EFIAPI
+AsanSetFuzzingActive (
+  IN BOOLEAN  Active
+  ) __attribute__ ((weak));
+
 #define COMM_BUFFER_SIZE  0x1000
 
 // The PI SMM communication region is the only non-SMRAM buffer SMM accepts
@@ -96,7 +104,16 @@ OnReadyToBoot (
 
     CommBuffer->MessageLength = InputSize;
     CommBufferSize            = OFFSET_OF (EFI_SMM_COMMUNICATE_HEADER, Data) + InputSize;
+    // A sanitizer report is only escalated to TSFFS while this window is open.
+    if (AsanSetFuzzingActive != NULL) {
+      AsanSetFuzzingActive (TRUE);
+    }
+
     SmmCommunication->Communicate (SmmCommunication, CommBuffer, &CommBufferSize);
+
+    if (AsanSetFuzzingActive != NULL) {
+      AsanSetFuzzingActive (FALSE);
+    }
 
     HARNESS_STOP ();
   }

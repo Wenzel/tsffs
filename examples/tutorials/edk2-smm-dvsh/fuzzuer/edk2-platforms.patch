@@ -1,0 +1,107 @@
+diff --git a/Platform/Intel/SimicsOpenBoardPkg/BoardX58Ich10/OpenBoardPkg.dsc b/Platform/Intel/SimicsOpenBoardPkg/BoardX58Ich10/OpenBoardPkg.dsc
+index d4c20ba..75bc176 100644
+--- a/Platform/Intel/SimicsOpenBoardPkg/BoardX58Ich10/OpenBoardPkg.dsc
++++ b/Platform/Intel/SimicsOpenBoardPkg/BoardX58Ich10/OpenBoardPkg.dsc
+@@ -18,6 +18,7 @@
+   DEFINE BOARD_PKG             = SimicsOpenBoardPkg
+   DEFINE SKT_PKG               = SimicsX58SktPkg
+   DEFINE PCH_PKG               = SimicsIch10Pkg
++  !include $(BOARD_PKG)/BoardX58Ich10/DvshDefines.dsc.inc
+   DEFINE DXE_ARCH              = X64
+   DEFINE PEI_ARCH              = IA32
+   DEFINE PROJECT               = $(BOARD_PKG)/$(BOARD_NAME)
+@@ -318,3 +319,16 @@
+   $(BOARD_PKG)/SmbiosPlatformDxe/SmbiosPlatformDxe.inf
+   BoardModulePkg/LegacySioDxe/LegacySioDxe.inf
+   BoardModulePkg/BoardBdsHookDxe/BoardBdsHookDxe.inf
++
++  # Damn Vulnerable SMI Handler and its TSFFS harness
++  DamnVulnerableSmmPkg/DvshSmi/DvshSmi.inf {
++    <BuildOptions>
++      *_CLANGSAN_X64_SAN_FLAGS == $(DVSH_SAN_FLAGS)
++      *_CLANGSAN_X64_CC_FLAGS = -Wno-error
++    <LibraryClasses>
++      AsanLib|MdeModulePkg/Library/AsanLib/AsanLib.inf
++      NULL|MdeModulePkg/Library/AsanLib/AsanLib.inf
++  }
++  DamnVulnerableSmmPkg/DvshHarness/DvshHarness.inf
++
++!include $(BOARD_PKG)/BoardX58Ich10/DvshPcds.dsc.inc
+diff --git a/Platform/Intel/SimicsOpenBoardPkg/BoardX58Ich10/OpenBoardPkg.fdf b/Platform/Intel/SimicsOpenBoardPkg/BoardX58Ich10/OpenBoardPkg.fdf
+index 22ed703..51d024c 100644
+--- a/Platform/Intel/SimicsOpenBoardPkg/BoardX58Ich10/OpenBoardPkg.fdf
++++ b/Platform/Intel/SimicsOpenBoardPkg/BoardX58Ich10/OpenBoardPkg.fdf
+@@ -218,6 +218,8 @@ INF  BoardModulePkg/BoardBdsHookDxe/BoardBdsHookDxe.inf
+ INF  MdeModulePkg/Bus/Isa/Ps2KeyboardDxe/Ps2KeyboardDxe.inf
+ 
+ INF  $(BOARD_PKG)/SmbiosPlatformDxe/SmbiosPlatformDxe.inf
++INF  DamnVulnerableSmmPkg/DvshSmi/DvshSmi.inf
++INF  DamnVulnerableSmmPkg/DvshHarness/DvshHarness.inf
+ 
+ INF  MdeModulePkg/Universal/Acpi/AcpiPlatformDxe/AcpiPlatformDxe.inf
+ INF  $(BOARD_PKG)/AcpiTables/MinPlatformAcpiTables/AcpiPlatform.inf
+diff --git a/Platform/Intel/SimicsOpenBoardPkg/SimicsPei/MemDetect.c b/Platform/Intel/SimicsOpenBoardPkg/SimicsPei/MemDetect.c
+index c680aeb..4a3ce13 100644
+--- a/Platform/Intel/SimicsOpenBoardPkg/SimicsPei/MemDetect.c
++++ b/Platform/Intel/SimicsOpenBoardPkg/SimicsPei/MemDetect.c
+@@ -366,6 +366,19 @@ PublishPeiMemory (
+     MemoryBase = mS3Supported && FeaturePcdGet (PcdSmmSmramRequire) ?
+       PcdGet32 (PcdSimicsDecompressionScratchEnd) :
+       PcdGet32 (PcdSimicsDxeMemFvBase) + PcdGet32 (PcdSimicsDxeMemFvSize);
++    //
++    // PEI memory must not span the ASan shadow, which is published as its own
++    // reserved range in QemuInitializeRam (DXE needs the PHIT range inside one
++    // system memory resource).
++    //
++    if ((GetSystemMemorySizeBelow4gb () >> 3) != 0) {
++      UINT64  ShadowEnd;
++
++      ShadowEnd = 0x5000000ULL + (GetSystemMemorySizeBelow4gb () >> 3);
++      if ((MemoryBase < ShadowEnd) && (ShadowEnd < LowerMemorySize)) {
++        MemoryBase = ShadowEnd;
++      }
++    }
+     MemorySize = LowerMemorySize - MemoryBase;
+   }
+   DEBUG((EFI_D_INFO, "MemoryBase=0x%lx MemorySize=0x%lx\n", MemoryBase, MemorySize));
+@@ -438,7 +451,24 @@ QemuInitializeRam (
+       UINT32 TsegSize;
+ 
+       TsegSize = mX58TsegMbytes * SIZE_1MB;
+-      AddMemoryRangeHob (BASE_1MB, LowerMemorySize - TsegSize);
++      //
++      // The ASan shadow gets its own reserved range. Left inside the system memory
++      // range below, DXE reports it as free memory, and with restricted SMM memory
++      // access the SMM page tables mark free memory not present: the first
++      // instrumented SMM access then faults reading its shadow byte.
++      //
++      if (((UINT64)(LowerMemorySize >> 3) != 0) &&
++          (0x5000000ULL + (LowerMemorySize >> 3) <= (UINT64)(LowerMemorySize - TsegSize))) {
++        //
++        // One page of shared ASan state sits in front of the shadow, in the same
++        // reserved range, so SMM can read it under restricted memory access.
++        //
++        AddMemoryRangeHob (BASE_1MB, 0x5000000 - SIZE_4KB);
++        AddReservedMemoryBaseSizeHob (0x5000000 - SIZE_4KB, SIZE_4KB + (LowerMemorySize >> 3), TRUE);
++        AddMemoryRangeHob (0x5000000 + (LowerMemorySize >> 3), LowerMemorySize - TsegSize);
++      } else {
++        AddMemoryRangeHob (BASE_1MB, LowerMemorySize - TsegSize);
++      }
+       AddReservedMemoryBaseSizeHob (LowerMemorySize - TsegSize, TsegSize,
+         TRUE);
+ 
+@@ -585,6 +615,14 @@ InitializeRamRegions (
+       //
+       // Build HOB for AsanInfo
+       //
++      // ASAN_INFO has grown fields (fuzzing window, protected regions, untrusted
++      // buffers) since this code was written; they must start out zero, the window closed.
++      ZeroMem (&AsanInfo, sizeof (ASAN_INFO));
++      AsanInfo.AsanSharedInfo = 0;
++      if (AsanShadowMemoryStart == 0x5000000) {
++        ZeroMem ((VOID *)(UINTN)(AsanShadowMemoryStart - SIZE_4KB), SIZE_4KB);
++        AsanInfo.AsanSharedInfo = AsanShadowMemoryStart - SIZE_4KB;
++      }
+       AsanInfo.AsanShadowMemorySize = AsanShadowMemorySize;
+       AsanInfo.AsanShadowMemoryStart = AsanShadowMemoryStart;
+       AsanInfo.AsanInited = 1;
