@@ -1,0 +1,51 @@
+diff --git a/Platform/Intel/SimicsOpenBoardPkg/BoardX58Ich10/OpenBoardPkg.dsc b/Platform/Intel/SimicsOpenBoardPkg/BoardX58Ich10/OpenBoardPkg.dsc
+index 3257156d23..7e56508c10 100644
+--- a/Platform/Intel/SimicsOpenBoardPkg/BoardX58Ich10/OpenBoardPkg.dsc
++++ b/Platform/Intel/SimicsOpenBoardPkg/BoardX58Ich10/OpenBoardPkg.dsc
+@@ -18,6 +18,7 @@
+   DEFINE BOARD_PKG             = SimicsOpenBoardPkg
+   DEFINE SKT_PKG               = SimicsX58SktPkg
+   DEFINE PCH_PKG               = SimicsIch10Pkg
++  !include $(BOARD_PKG)/BoardX58Ich10/DvshDefines.dsc.inc
+   DEFINE DXE_ARCH              = X64
+   DEFINE PEI_ARCH              = IA32
+   DEFINE PROJECT               = $(BOARD_PKG)/$(BOARD_NAME)
+@@ -300,3 +301,12 @@
+   $(BOARD_PKG)/SmbiosPlatformDxe/SmbiosPlatformDxe.inf
+   BoardModulePkg/LegacySioDxe/LegacySioDxe.inf
+   BoardModulePkg/BoardBdsHookDxe/BoardBdsHookDxe.inf
++
++  # Damn Vulnerable SMI Handler and its TSFFS harness
++  DamnVulnerableSmmPkg/DvshSmi/DvshSmi.inf {
++    <BuildOptions>
++      GCC:*_*_*_CC_FLAGS = $(DVSH_CC_FLAGS)
++  }
++  DamnVulnerableSmmPkg/DvshHarness/DvshHarness.inf
++
++!include $(BOARD_PKG)/BoardX58Ich10/DvshPcds.dsc.inc
+diff --git a/Platform/Intel/SimicsOpenBoardPkg/BoardX58Ich10/OpenBoardPkg.fdf b/Platform/Intel/SimicsOpenBoardPkg/BoardX58Ich10/OpenBoardPkg.fdf
+index ceace433a6..784f0daca3 100644
+--- a/Platform/Intel/SimicsOpenBoardPkg/BoardX58Ich10/OpenBoardPkg.fdf
++++ b/Platform/Intel/SimicsOpenBoardPkg/BoardX58Ich10/OpenBoardPkg.fdf
+@@ -212,6 +212,8 @@ INF  BoardModulePkg/BoardBdsHookDxe/BoardBdsHookDxe.inf
+ INF  MdeModulePkg/Bus/Isa/Ps2KeyboardDxe/Ps2KeyboardDxe.inf
+ 
+ INF  $(BOARD_PKG)/SmbiosPlatformDxe/SmbiosPlatformDxe.inf
++INF  DamnVulnerableSmmPkg/DvshSmi/DvshSmi.inf
++INF  DamnVulnerableSmmPkg/DvshHarness/DvshHarness.inf
+ 
+ INF  MdeModulePkg/Universal/Acpi/AcpiPlatformDxe/AcpiPlatformDxe.inf
+ INF  $(BOARD_PKG)/AcpiTables/MinPlatformAcpiTables/AcpiPlatform.inf
+diff --git a/Platform/Intel/SimicsOpenBoardPkg/BoardX58Ich10/OpenBoardPkgPcd.dsc b/Platform/Intel/SimicsOpenBoardPkg/BoardX58Ich10/OpenBoardPkgPcd.dsc
+index 180f229545..8855363f90 100644
+--- a/Platform/Intel/SimicsOpenBoardPkg/BoardX58Ich10/OpenBoardPkgPcd.dsc
++++ b/Platform/Intel/SimicsOpenBoardPkg/BoardX58Ich10/OpenBoardPkgPcd.dsc
+@@ -43,7 +43,7 @@
+   gUefiCpuPkgTokenSpaceGuid.PcdCpuHotPlugSupport|FALSE
+   gUefiCpuPkgTokenSpaceGuid.PcdCpuSmmEnableBspElection|FALSE
+   gUefiCpuPkgTokenSpaceGuid.PcdSmmFeatureControlEnable|FALSE
+-  gUefiCpuPkgTokenSpaceGuid.PcdSmrrEnable|FALSE
++  gUefiCpuPkgTokenSpaceGuid.PcdSmrrEnable|TRUE
+ 
+   ######################################
+   # Platform Configuration

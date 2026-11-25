@@ -1,0 +1,40 @@
+## @file
+# Damn Vulnerable SMI Handler (DVSH) -- DXE_SMM_DRIVER.
+#
+# Registers an SMI handler that dispatches on a Command byte to a
+# catalogue of intentional bugs, one clean trigger per sanitizer check.
+# Debug/research use only.
+#
+# SPDX-License-Identifier: BSD-2-Clause-Patent
+##
+
+[Defines]
+  INF_VERSION              = 0x00010005
+  BASE_NAME                = DvshSmi
+  FILE_GUID                = 259e0fe3-8b57-4e63-935a-d83def7feb02
+  MODULE_TYPE              = DXE_SMM_DRIVER
+  PI_SPECIFICATION_VERSION = 0x0001000A
+  VERSION_STRING           = 0.1
+  ENTRY_POINT              = DvshSmiEntryPoint
+
+[Sources]
+  DvshSmi.c
+
+[Packages]
+  MdePkg/MdePkg.dec
+  MdeModulePkg/MdeModulePkg.dec
+  DamnVulnerableSmmPkg/DamnVulnerableSmmPkg.dec
+
+[LibraryClasses]
+  UefiDriverEntryPoint
+  PrintLib
+  SerialPortLib
+  BaseMemoryLib
+  MemoryAllocationLib
+  SmmServicesTableLib
+
+[Guids]
+  gDvshSmiHandlerGuid       ## PRODUCES
+
+[Depex.common]
+  TRUE

@@ -1,0 +1,24 @@
+## @file
+# DamnVulnerableSmmPkg - Damn Vulnerable SMI Handler (DVSH) package.
+#
+# Portable, debug-only EDK2 package providing an SMI handler that triggers
+# a catalogue of intentional memory-safety/UB bugs from SMM context, one
+# clean trigger per sanitizer check. Dependencies are MdePkg and
+# MdeModulePkg only, so this package can be consumed by any EDK2-based
+# EDK2-based firmware with traditional SMM (SmiHandlerRegister).
+#
+# SPDX-License-Identifier: BSD-2-Clause-Patent
+##
+
+[Defines]
+  DEC_SPECIFICATION = 0x00010005
+  PACKAGE_NAME      = DamnVulnerableSmmPkg
+  PACKAGE_GUID      = 93e9b1b0-2e0f-4b43-9e18-9f1a9f9f2b3a
+  PACKAGE_VERSION   = 0.1
+
+[Includes]
+  Include
+
+[Guids]
+  # Handler identification GUID for SmiHandlerRegister / SmmCommunication.
+  gDvshSmiHandlerGuid = { 0x25e6d8fc, 0x29fa, 0x48c2, { 0x8f, 0x8c, 0x63, 0x05, 0xed, 0xa8, 0xf3, 0xee } }

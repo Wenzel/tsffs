@@ -1,0 +1,13 @@
+# Copyright (C) 2024 Intel Corporation
+# SPDX-License-Identifier: Apache-2.0
+
+# Boot an image for two simulated minutes and keep the serial console in
+# boot-step$step.log, without the fuzzer. Used to look at step 4's failure:
+#   ./simics --no-win --batch-mode -e '$step="4"' boot.simics
+#   grep ASSERT boot-step4.log
+
+load-module tsffs
+load-target "qsp-x86/qsp-uefi-custom" namespace = qsp machine:software:firmware:bios = ("%simics%/images/step" + $step + ".fd")
+qsp.serconsole.con.capture-start ("boot-step" + $step + ".log") -overwrite
+run-seconds 120
+quit

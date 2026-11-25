@@ -1,0 +1,40 @@
+## @file
+# TSFFS harness for DVSH: drives the fuzz loop around SmmCommunication.
+#
+# Copyright (C) 2024 Intel Corporation
+# SPDX-License-Identifier: BSD-2-Clause-Patent
+##
+
+[Defines]
+  INF_VERSION    = 0x00010005
+  BASE_NAME      = DvshHarness
+  FILE_GUID      = 8c6e0b55-3c5a-4f0e-b3a4-1d5a9e7c42f1
+  MODULE_TYPE    = DXE_DRIVER
+  VERSION_STRING = 1.0
+  ENTRY_POINT    = DvshHarnessEntryPoint
+
+[Sources]
+  DvshHarness.c
+
+[Packages]
+  MdePkg/MdePkg.dec
+  MdeModulePkg/MdeModulePkg.dec
+  DamnVulnerableSmmPkg/DamnVulnerableSmmPkg.dec
+
+[LibraryClasses]
+  UefiDriverEntryPoint
+  UefiLib
+  UefiBootServicesTableLib
+  BaseMemoryLib
+  DebugLib
+
+[Guids]
+  gDvshSmiHandlerGuid
+  gEdkiiPiSmmCommunicationRegionTableGuid
+  gEfiEventReadyToBootGuid
+
+[Protocols]
+  gEfiSmmCommunicationProtocolGuid
+
+[Depex]
+  gEfiSmmCommunicationProtocolGuid

@@ -51,6 +51,7 @@
     - [Configuring the Fuzzer](tutorials/edk2-simics-platform-bios/configuring.md)
     - [Running the Fuzzer](tutorials/edk2-simics-platform-bios/running.md)
     - [Optimizing the Fuzzer](tutorials/edk2-simics-platform-bios/optimizing.md)
+  - [Testing SMM Memory Protections With TSFFS Replay](tutorials/edk2-smm-dvsh/README.md)
   - [Fuzzing a Windows Kernel Mode Driver (KMD)](tutorials/windows-kernel/README.md)
     - [Building a Windows Image](tutorials/windows-kernel/building-windows-image/README.md)
       1. [Install VirtualBox](tutorials/windows-kernel/building-windows-image/install-virtualbox.md)

@@ -1,0 +1,61 @@
+diff --git a/MdePkg/Library/BaseLib/CpuDeadLoop.c b/MdePkg/Library/BaseLib/CpuDeadLoop.c
+index b3b7548fa5..3bea0301f6 100644
+--- a/MdePkg/Library/BaseLib/CpuDeadLoop.c
++++ b/MdePkg/Library/BaseLib/CpuDeadLoop.c
+@@ -8,6 +8,7 @@
+ 
+ #include <Base.h>
+ #include <Library/BaseLib.h>
++#include <Library/Tsffs.h>
+ 
+ /**
+   Executes an infinite loop.
+@@ -26,6 +27,8 @@ CpuDeadLoop (
+ {
+   volatile UINTN  Index;
+ 
++  HARNESS_ASSERT ();
++
+   for (Index = 0; Index == 0;) {
+     CpuPause ();
+   }
+diff --git a/MdePkg/Library/BaseLib/Ia32/GccInline.c b/MdePkg/Library/BaseLib/Ia32/GccInline.c
+index dab20c8aa2..a10da1a867 100644
+--- a/MdePkg/Library/BaseLib/Ia32/GccInline.c
++++ b/MdePkg/Library/BaseLib/Ia32/GccInline.c
+@@ -8,6 +8,7 @@
+ **/
+ 
+ #include "BaseLibInternals.h"
++#include <Library/Tsffs.h>
+ 
+ /**
+   Used to serialize load and store operations.
+@@ -57,6 +58,7 @@ CpuBreakpoint (
+   VOID
+   )
+ {
++  HARNESS_ASSERT ();
+   __asm__ __volatile__ ("int $3");
+ }
+ 
+diff --git a/MdePkg/Library/BaseLib/X64/GccInline.c b/MdePkg/Library/BaseLib/X64/GccInline.c
+index c21eb0622e..4cbed0ab88 100644
+--- a/MdePkg/Library/BaseLib/X64/GccInline.c
++++ b/MdePkg/Library/BaseLib/X64/GccInline.c
+@@ -8,6 +8,7 @@
+ **/
+ 
+ #include "BaseLibInternals.h"
++#include <Library/Tsffs.h>
+ 
+ /**
+   Used to serialize load and store operations.
+@@ -57,6 +58,7 @@ CpuBreakpoint (
+   VOID
+   )
+ {
++  HARNESS_ASSERT ();
+   __asm__ __volatile__ ("int $3");
+ }
+ 

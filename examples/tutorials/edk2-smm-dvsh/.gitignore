@@ -1,0 +1,5 @@
+DamnVulnerableSmmPkg/DvshHarness/tsffs.h
+project/images/
+project/seeds-step*/
+project/replay-step*.log
+project/boot-step*.log
